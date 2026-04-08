@@ -102,6 +102,7 @@ window.selectGene = async function(gene) {
   }
   if (chunkId != null && loadedChunks.has(chunkId)) {
     renderGeneHeader(gene); renderVariantList();
+    renderGenomeBrowser('genome-browser', gene);
     renderDrift(gene); renderHotspots(gene); renderTimeline(gene); renderConcordance(gene); renderSurvival(gene);
   }
 };
@@ -352,6 +353,156 @@ function renderSurvival(gene) {
   el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">VUS Survival Curve</div><div class="section-body collapsed"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100px;">${grid}<polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="1.5"/>${circles}${xL}${yL}<text x="${w/2}" y="${h}" text-anchor="middle" fill="#64748b" font-size="9">days since VUS submission</text></svg></div>`;
 }
 
+function renderGenomeBrowser(containerId, gene) {
+  const el = document.getElementById(containerId);
+  if (!el || !tracker || !focusGene) { if (el) el.innerHTML = ''; return; }
+
+  // Get all variants for this gene with positions
+  let result;
+  try {
+    result = JSON.parse(tracker.query(JSON.stringify({
+      gene: gene, limit: 5000, sort_by: 'position', sort_asc: true
+    })));
+  } catch(e) { el.innerHTML = ''; return; }
+  const variants = (result.variants || []).filter(v => v.pos > 0);
+  if (!variants.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:9px">No genomic coordinates available</div>'; return; }
+
+  // Determine genomic range
+  const minPos = variants[0].pos;
+  const maxPos = variants[variants.length - 1].pos;
+  const span = maxPos - minPos || 1;
+  const chrom = variants[0].chrom || '?';
+
+  // State for zoom/pan
+  let viewStart = minPos - span * 0.05;
+  let viewEnd = maxPos + span * 0.05;
+
+  function render() {
+    const viewSpan = viewEnd - viewStart;
+    const w = 400, h = 70;
+
+    const classColor = (c) => {
+      const s = shortClass(c);
+      if (s.includes('path')) return '#dc2626';
+      if (s === 'VUS') return '#eab308';
+      if (s.includes('ben')) return '#16a34a';
+      if (s.includes('confl')) return '#8b5cf6';
+      return '#94a3b8';
+    };
+
+    const toX = (pos) => ((pos - viewStart) / viewSpan) * w;
+
+    let variantSVG = '';
+    const visible = variants.filter(v => v.pos >= viewStart && v.pos <= viewEnd);
+
+    if (visible.length > 200) {
+      // Density heatmap mode
+      const bins = new Array(w).fill(null).map(() => ({path:0, vus:0, ben:0, total:0}));
+      for (const v of visible) {
+        const x = Math.floor(toX(v.pos));
+        if (x >= 0 && x < w) {
+          bins[x].total++;
+          const s = shortClass(v.classification);
+          if (s.includes('path')) bins[x].path++;
+          else if (s === 'VUS') bins[x].vus++;
+          else bins[x].ben++;
+        }
+      }
+      for (let x = 0; x < w; x++) {
+        if (bins[x].total === 0) continue;
+        const intensity = Math.min(bins[x].total / 5, 1);
+        const mainColor = bins[x].path > bins[x].vus ? '#dc2626' : bins[x].vus > bins[x].ben ? '#eab308' : '#16a34a';
+        variantSVG += `<rect x="${x}" y="${20}" width="1" height="${30 * intensity + 5}" fill="${mainColor}" opacity="${0.3 + intensity * 0.7}"><title>${bins[x].total} variants at chr${chrom}:${Math.round(viewStart + (x/w)*viewSpan)}</title></rect>`;
+      }
+    } else {
+      // Lollipop mode
+      for (const v of visible) {
+        const x = toX(v.pos).toFixed(1);
+        const color = classColor(v.classification);
+        const sc = shortClass(v.classification);
+        variantSVG += `<line x1="${x}" y1="50" x2="${x}" y2="25" stroke="${color}" stroke-width="1" opacity="0.6"/>`;
+        variantSVG += `<circle cx="${x}" cy="22" r="3" fill="${color}" opacity="0.8"><title>${v.gene} ${v.hgvs} (${sc})\nchr${chrom}:${v.pos}</title></circle>`;
+      }
+    }
+
+    // Axis ticks
+    const ticks = 5;
+    let axisSVG = '';
+    for (let i = 0; i <= ticks; i++) {
+      const pos = viewStart + (viewSpan * i / ticks);
+      const x = (i / ticks) * w;
+      const label = pos >= 1e6 ? (pos/1e6).toFixed(2) + 'M' : pos >= 1e3 ? (pos/1e3).toFixed(0) + 'K' : pos.toFixed(0);
+      axisSVG += `<line x1="${x}" y1="55" x2="${x}" y2="58" stroke="#cbd5e1" stroke-width="0.5"/>`;
+      axisSVG += `<text x="${x}" y="66" text-anchor="middle" fill="#64748b" font-size="7">${label}</text>`;
+    }
+
+    // Navigation controls
+    const controls = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+        <span style="font-size:8px;color:#64748b;">chr${chrom}:${Math.round(viewStart)}\u2013${Math.round(viewEnd)} (${visible.length} variants)</span>
+        <span style="display:flex;gap:2px;">
+          <button onclick="browserZoom(0.5)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">+</button>
+          <button onclick="browserZoom(2)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2212</button>
+          <button onclick="browserPan(-0.3)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2190</button>
+          <button onclick="browserPan(0.3)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2192</button>
+          <button onclick="browserReset()" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u27F2</button>
+        </span>
+      </div>
+    `;
+
+    // Gene track bar
+    const geneBar = `<rect x="0" y="12" width="${w}" height="4" rx="2" fill="#e2e8f0"/>
+      <rect x="${toX(minPos)}" y="12" width="${Math.max(toX(maxPos) - toX(minPos), 2)}" height="4" rx="2" fill="#0f766e" opacity="0.3"/>
+      <text x="${toX(minPos)}" y="9" fill="#0f766e" font-size="8" font-weight="600">${gene}</text>`;
+
+    el.innerHTML = controls + `
+      <svg viewBox="0 0 ${w} 70" style="width:100%;height:70px;">
+        ${geneBar}
+        ${variantSVG}
+        <line x1="0" y1="55" x2="${w}" y2="55" stroke="#e2e8f0" stroke-width="0.5"/>
+        ${axisSVG}
+      </svg>
+    `;
+  }
+
+  // Zoom/Pan controls
+  window.browserZoom = function(factor) {
+    const center = (viewStart + viewEnd) / 2;
+    const halfSpan = ((viewEnd - viewStart) / 2) * factor;
+    viewStart = center - halfSpan;
+    viewEnd = center + halfSpan;
+    render();
+  };
+
+  window.browserPan = function(fraction) {
+    const shift = (viewEnd - viewStart) * fraction;
+    viewStart += shift;
+    viewEnd += shift;
+    render();
+  };
+
+  window.browserReset = function() {
+    viewStart = minPos - span * 0.05;
+    viewEnd = maxPos + span * 0.05;
+    render();
+  };
+
+  // Mouse wheel zoom
+  el.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1.3 : 0.7;
+    const rect = el.querySelector('svg')?.getBoundingClientRect();
+    if (!rect) return;
+    const mouseX = (e.clientX - rect.left) / rect.width;
+    const mousePos = viewStart + mouseX * (viewEnd - viewStart);
+    viewStart = mousePos - (mousePos - viewStart) * factor;
+    viewEnd = mousePos + (viewEnd - mousePos) * factor;
+    render();
+  }, { passive: false });
+
+  render();
+}
+
 function renderIdeogram() {
   const el = $('ideogram-section'); if (!el) return;
   const bins = indexCache?.chromosome_bins; if (!bins) { el.innerHTML=''; return; }
@@ -362,9 +513,56 @@ function renderIdeogram() {
     let p=`<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" rx="3" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="0.5"/>`;
     for (const pos of Object.keys(cb).map(Number).sort((a,b)=>a-b)) { const c=cb[pos],f=c/maxCount,by=y0+(pos/(cL[chr]*1e6||1))*chrH,bh=Math.max(1,(1/(cL[chr]||1))*chrH);
       p+=`<rect x="${x}" y="${by}" width="${barW}" height="${bh}" fill="rgb(${15-Math.round(f*15)},${118-Math.round(f*48)},${110-Math.round(f*40)})" opacity="${0.3+f*0.7}"><title>${chr}:${pos} \u2014 ${c} variants</title></rect>`; }
-    return p+`<text x="${x+barW/2}" y="${h-4}" text-anchor="middle" fill="#64748b" font-size="9">${chr.replace('chr','')}</text>`; }).join('');
-  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Chromosome Ideogram</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">${elems}</svg></div>`;
+    return p+`<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" fill="transparent" style="cursor:pointer;" onclick="zoomChromosome('${chr}')"/><text x="${x+barW/2}" y="${h-4}" text-anchor="middle" fill="#64748b" font-size="9" style="cursor:pointer;" onclick="zoomChromosome('${chr}')">${chr.replace('chr','')}</text>`; }).join('');
+  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Chromosome Ideogram</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;cursor:pointer;" preserveAspectRatio="xMinYMin meet">${elems}</svg><div id="ideogram-zoom" style="display:none;margin-top:4px;"></div></div>`;
 }
+
+window.zoomChromosome = function(chr) {
+  const el = document.getElementById('ideogram-zoom');
+  if (!el || !indexCache?.chromosome_bins) return;
+  const cb = indexCache.chromosome_bins[chr];
+  if (!cb || !Object.keys(cb).length) { el.style.display='none'; return; }
+
+  // If already showing this chromosome, toggle off
+  if (el.dataset.chr === chr) { el.style.display='none'; el.dataset.chr=''; return; }
+  el.dataset.chr = chr;
+  el.style.display = 'block';
+
+  const cL={chr1:248,chr2:242,chr3:198,chr4:190,chr5:181,chr6:170,chr7:159,chr8:145,chr9:138,chr10:133,chr11:135,chr12:133,chr13:114,chr14:107,chr15:101,chr16:90,chr17:83,chr18:80,chr19:58,chr20:64,chr21:46,chr22:50,chrX:156,chrY:57};
+  const chrLen = (cL[chr] || 100) * 1e6;
+  const positions = Object.keys(cb).map(Number).sort((a,b) => a - b);
+  const w = 400, h = 50, pad = 10;
+
+  let maxCount = 1;
+  for (const p of positions) { if (cb[p] > maxCount) maxCount = cb[p]; }
+
+  // Draw expanded chromosome with density bars
+  const toX = (pos) => pad + ((pos / chrLen) * (w - 2 * pad));
+  let bars = '';
+  for (const pos of positions) {
+    const x = toX(pos);
+    const count = cb[pos];
+    const f = count / maxCount;
+    const barH = 4 + f * 26;
+    bars += `<rect x="${x - 1}" y="${30 - barH}" width="3" height="${barH}" rx="1" fill="rgb(${15 + Math.round(f * 200)},${118 - Math.round(f * 80)},${110 - Math.round(f * 70)})" opacity="${0.4 + f * 0.6}"><title>${chr}:${pos.toLocaleString()} \u2014 ${count} variants</title></rect>`;
+  }
+
+  // Axis labels
+  const axisLabels = [0, 0.25, 0.5, 0.75, 1].map(frac => {
+    const pos = Math.round(chrLen * frac);
+    const x = pad + frac * (w - 2 * pad);
+    const label = pos >= 1e6 ? (pos/1e6).toFixed(0) + 'M' : (pos/1e3).toFixed(0) + 'K';
+    return `<text x="${x}" y="${h - 2}" text-anchor="middle" fill="#64748b" font-size="8">${label}</text>`;
+  }).join('');
+
+  el.innerHTML = `<div style="font-size:9px;color:#0f766e;font-weight:600;margin-bottom:2px;">${chr} expanded <span style="color:#94a3b8;font-weight:normal;cursor:pointer;" onclick="document.getElementById('ideogram-zoom').style.display='none';document.getElementById('ideogram-zoom').dataset.chr='';">\u2715</span></div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
+      <rect x="${pad}" y="28" width="${w - 2*pad}" height="4" rx="2" fill="#e2e8f0"/>
+      ${bars}
+      <line x1="${pad}" y1="35" x2="${w - pad}" y2="35" stroke="#e2e8f0" stroke-width="0.5"/>
+      ${axisLabels}
+    </svg>`;
+};
 
 // ── Report Date ────────────────────────────────────────────
 function onReportDate(e) {
