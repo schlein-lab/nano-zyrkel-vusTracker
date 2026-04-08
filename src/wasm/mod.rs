@@ -306,6 +306,177 @@ impl VusTracker {
         serde_json::to_string(&curve).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Unified query: filter + sort + search in one call.
+    /// filter_json format:
+    /// { "gene": "LDLR", "classes": [0,1,2], "date_from": "2020-01-01",
+    ///   "search": "c.1098", "sort_by": "classification", "sort_asc": true,
+    ///   "limit": 100, "offset": 0 }
+    /// Returns: { "total": 4808, "filtered": 342, "variants": [...], "stats": {...} }
+    pub fn query(&self, filter_json: &str) -> String {
+        let filter: serde_json::Value = match serde_json::from_str(filter_json) {
+            Ok(v) => v,
+            Err(e) => return serde_json::json!({"error": e.to_string()}).to_string(),
+        };
+
+        let total = self.variants.len();
+
+        // Build filtered index list
+        let gene_filter = filter.get("gene").and_then(|v| v.as_str()).map(|s| s.to_uppercase());
+        let classes: Option<Vec<u8>> = filter.get("classes").and_then(|v| {
+            v.as_array().map(|arr| arr.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect())
+        });
+        let date_from = filter.get("date_from").and_then(|v| v.as_str());
+        let search = filter.get("search").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+
+        let class_for_num = |v: &ClinVarVariant| -> u8 {
+            match &v.classification {
+                Classification::Pathogenic => 0,
+                Classification::LikelyPathogenic => 1,
+                Classification::Vus => 2,
+                Classification::LikelyBenign => 3,
+                Classification::Benign => 4,
+                Classification::ConflictingInterpretations => 5,
+                Classification::Other(_) => 6,
+            }
+        };
+
+        // Start with gene-filtered indices or all
+        let candidate_indices: Vec<usize> = match &gene_filter {
+            Some(g) => self.gene_index.get(g).cloned().unwrap_or_default(),
+            None => (0..self.variants.len()).collect(),
+        };
+
+        let mut filtered: Vec<usize> = candidate_indices.into_iter().filter(|&i| {
+            let v = &self.variants[i];
+
+            if let Some(ref cls) = classes {
+                if !cls.contains(&class_for_num(v)) {
+                    return false;
+                }
+            }
+
+            if let Some(df) = date_from {
+                if v.last_evaluated.as_str() < df {
+                    return false;
+                }
+            }
+
+            if let Some(ref q) = search {
+                let hit = v.hgvs.to_lowercase().contains(q)
+                    || v.gene.to_lowercase().contains(q)
+                    || v.condition.to_lowercase().contains(q)
+                    || v.variation_id.contains(q.as_str());
+                if !hit {
+                    return false;
+                }
+            }
+
+            true
+        }).collect();
+
+        let filtered_count = filtered.len();
+
+        // Stats over filtered set
+        let mut stats_counts = [0u32; 7]; // path, lpath, vus, lben, ben, confl, other
+        for &i in &filtered {
+            stats_counts[class_for_num(&self.variants[i]) as usize] += 1;
+        }
+
+        // Sort
+        let sort_by = filter.get("sort_by").and_then(|v| v.as_str()).unwrap_or("date");
+        let sort_asc = filter.get("sort_asc").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        filtered.sort_unstable_by(|&a, &b| {
+            let va = &self.variants[a];
+            let vb = &self.variants[b];
+            let ord = match sort_by {
+                "classification" => class_for_num(va).cmp(&class_for_num(vb)),
+                "date" => va.last_evaluated.cmp(&vb.last_evaluated),
+                "hgvs" => va.hgvs.cmp(&vb.hgvs),
+                "gene" => va.gene.to_uppercase().cmp(&vb.gene.to_uppercase()),
+                "position" => va.chrom.cmp(&vb.chrom).then(va.pos.cmp(&vb.pos)),
+                _ => va.last_evaluated.cmp(&vb.last_evaluated),
+            };
+            if sort_asc { ord } else { ord.reverse() }
+        });
+
+        // Paginate
+        let offset = filter.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let limit = filter.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+
+        let page: Vec<&ClinVarVariant> = filtered.iter()
+            .skip(offset)
+            .take(limit)
+            .map(|&i| &self.variants[i])
+            .collect();
+
+        serde_json::json!({
+            "total": total,
+            "filtered": filtered_count,
+            "variants": page,
+            "stats": {
+                "pathogenic": stats_counts[0],
+                "likely_pathogenic": stats_counts[1],
+                "vus": stats_counts[2],
+                "likely_benign": stats_counts[3],
+                "benign": stats_counts[4],
+                "conflicting": stats_counts[5],
+                "other": stats_counts[6],
+            }
+        }).to_string()
+    }
+
+    /// Monthly submission counts for a gene.
+    pub fn submissions_timeline(&self, gene: &str) -> String {
+        let upper = gene.to_uppercase();
+        let indices = match self.gene_index.get(&upper) {
+            Some(idxs) => idxs,
+            None => return serde_json::json!({"gene": gene, "months": {}}).to_string(),
+        };
+
+        // month_key -> { class_short -> count }
+        let mut timeline: std::collections::BTreeMap<String, HashMap<&str, u32>> = std::collections::BTreeMap::new();
+
+        for &i in indices {
+            let v = &self.variants[i];
+            // Extract YYYY-MM from last_evaluated
+            let month = if v.last_evaluated.len() >= 7 {
+                &v.last_evaluated[..7]
+            } else {
+                continue;
+            };
+            let entry = timeline.entry(month.to_string()).or_default();
+            *entry.entry(v.classification.short()).or_insert(0) += 1;
+        }
+
+        serde_json::json!({
+            "gene": gene,
+            "total": indices.len(),
+            "months": timeline,
+        }).to_string()
+    }
+
+    /// Monthly reclassification counts by direction.
+    pub fn changes_timeline(&self) -> String {
+        let mut timeline: std::collections::BTreeMap<String, HashMap<String, u32>> = std::collections::BTreeMap::new();
+
+        for r in &self.reclassifications {
+            let month = if r.detected_at.len() >= 7 {
+                &r.detected_at[..7]
+            } else {
+                continue;
+            };
+            let direction = format!("{}_to_{}", r.old.short(), r.new.short());
+            let entry = timeline.entry(month.to_string()).or_default();
+            *entry.entry(direction).or_insert(0) += 1;
+        }
+
+        serde_json::json!({
+            "total": self.reclassifications.len(),
+            "months": timeline,
+        }).to_string()
+    }
+
     /// Compute stats for a gene range (distributed computing).
     /// Returns JSON with input_hash + output_hash for verification.
     pub fn compute_range(&self, start: usize, end: usize) -> String {

@@ -236,59 +236,168 @@ fn detect_historical_reclassifications(variants: &[ClinVarVariant]) -> Vec<Recla
     events
 }
 
-/// Build a compact index for the frontend.
-/// Contains everything the browser needs without loading variant data.
+/// Build a comprehensive index for the frontend.
+/// Contains everything the browser needs: ALL gene breakdowns, time-bucketed stats,
+/// chromosome density, condition index, chunk mapping.
 fn build_index(variants: &[ClinVarVariant], reclassifications: &[ReclassificationEvent]) -> serde_json::Value {
-    let mut gene_counts: HashMap<String, u32> = HashMap::new();
+    let today = chrono::Utc::now().date_naive();
     let mut class_counts: HashMap<String, u32> = HashMap::new();
     let mut date_min = String::from("9999");
     let mut date_max = String::from("0000");
 
-    // Per-gene classification breakdown: gene → {path, lpath, vus, lben, ben, confl}
+    // Per-gene classification breakdown: ALL genes
     let mut gene_class: HashMap<String, [u32; 7]> = HashMap::new();
 
+    // Time-bucketed counts
+    let periods = [
+        ("7d", today - chrono::Duration::days(7)),
+        ("1m", today - chrono::Duration::days(30)),
+        ("1y", today - chrono::Duration::days(365)),
+        ("5y", today - chrono::Duration::days(1825)),
+    ];
+    let mut period_counts: HashMap<&str, [u32; 7]> = HashMap::new(); // same 7 classes
+    let mut period_totals: HashMap<&str, u32> = HashMap::new();
+
+    // Chromosome density bins (1 MB bins)
+    let mut chrom_bins: HashMap<String, HashMap<u32, u32>> = HashMap::new();
+
+    // Condition index
+    let mut condition_counts: HashMap<String, u32> = HashMap::new();
+    let mut condition_genes: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+
     for v in variants {
-        *gene_counts.entry(v.gene.clone()).or_default() += 1;
         *class_counts.entry(v.classification.short().to_string()).or_default() += 1;
         if !v.last_evaluated.is_empty() && v.last_evaluated != "-" {
             if v.last_evaluated < date_min { date_min = v.last_evaluated.clone(); }
             if v.last_evaluated > date_max { date_max = v.last_evaluated.clone(); }
         }
 
+        // Gene breakdown
         let gc = gene_class.entry(v.gene.clone()).or_default();
-        match v.classification {
-            Classification::Pathogenic => gc[0] += 1,
-            Classification::LikelyPathogenic => gc[1] += 1,
-            Classification::Vus => gc[2] += 1,
-            Classification::LikelyBenign => gc[3] += 1,
-            Classification::Benign => gc[4] += 1,
-            Classification::ConflictingInterpretations => gc[5] += 1,
-            Classification::Other(_) => gc[6] += 1,
+        let ci = match v.classification {
+            Classification::Pathogenic => 0,
+            Classification::LikelyPathogenic => 1,
+            Classification::Vus => 2,
+            Classification::LikelyBenign => 3,
+            Classification::Benign => 4,
+            Classification::ConflictingInterpretations => 5,
+            Classification::Other(_) => 6,
+        };
+        gc[ci] += 1;
+
+        // Time-bucketed counts
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(&v.last_evaluated, "%Y-%m-%d") {
+            for (label, cutoff) in &periods {
+                if d >= *cutoff {
+                    *period_totals.entry(label).or_default() += 1;
+                    period_counts.entry(label).or_default()[ci] += 1;
+                }
+            }
+        }
+
+        // Chromosome density (1 MB bins)
+        if !v.chrom.is_empty() && v.pos > 0 {
+            let bin = (v.pos / 1_000_000) as u32;
+            *chrom_bins.entry(v.chrom.clone()).or_default().entry(bin).or_default() += 1;
+        }
+
+        // Condition index
+        if !v.condition.is_empty() && v.condition != "not provided" && v.condition != "not specified" {
+            for cond in v.condition.split('|') {
+                let cond = cond.trim();
+                if !cond.is_empty() && cond != "not provided" && cond != "not specified" {
+                    *condition_counts.entry(cond.to_string()).or_default() += 1;
+                    condition_genes.entry(cond.to_string()).or_default().insert(v.gene.clone());
+                }
+            }
         }
     }
 
-    // Top 50 genes
-    let mut top_genes: Vec<(String, u32)> = gene_counts.into_iter().collect();
+    // Time-bucketed reclassification counts
+    let mut period_changes: HashMap<&str, u32> = HashMap::new();
+    for r in reclassifications {
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(&r.detected_at, "%Y-%m-%d") {
+            for (label, cutoff) in &periods {
+                if d >= *cutoff {
+                    *period_changes.entry(label).or_default() += 1;
+                }
+            }
+        }
+    }
+
+    // by_period JSON
+    let by_period: HashMap<&str, serde_json::Value> = periods.iter().map(|(label, _)| {
+        let pc = period_counts.get(label).copied().unwrap_or([0; 7]);
+        (*label, serde_json::json!({
+            "total": period_totals.get(label).copied().unwrap_or(0),
+            "path": pc[0], "l_path": pc[1], "vus": pc[2],
+            "l_ben": pc[3], "ben": pc[4], "confl": pc[5],
+            "changes": period_changes.get(label).copied().unwrap_or(0),
+        }))
+    }).collect();
+
+    // ALL gene breakdowns (not just top 60)
+    let gene_breakdowns: HashMap<String, serde_json::Value> = gene_class.iter()
+        .map(|(g, c)| (g.clone(), serde_json::json!({
+            "total": c.iter().sum::<u32>(),
+            "pathogenic": c[0], "likely_pathogenic": c[1],
+            "vus": c[2], "likely_benign": c[3], "benign": c[4],
+            "conflicting": c[5], "other": c[6],
+        })))
+        .collect();
+
+    // Top 50 genes (sorted by count)
+    let mut top_genes: Vec<(String, u32)> = gene_class.iter()
+        .map(|(g, c)| (g.clone(), c.iter().sum::<u32>()))
+        .collect();
     top_genes.sort_by(|a, b| b.1.cmp(&a.1));
     top_genes.truncate(50);
 
-    // Gene breakdowns for top 50 + key clinical genes
-    let focus_genes: Vec<String> = {
-        let mut g: Vec<String> = top_genes.iter().map(|(n, _)| n.clone()).collect();
-        for extra in ["LDLR", "BRCA1", "BRCA2", "TP53", "MLH1", "MSH2", "CFTR", "MYH7", "SCN5A", "PALB2"] {
-            if !g.contains(&extra.to_string()) { g.push(extra.to_string()); }
-        }
-        g
-    };
+    // Gene-to-chunk mapping: alphabetically sorted, ~200k variants per chunk
+    let mut genes_sorted: Vec<(&String, u32)> = gene_class.iter()
+        .map(|(g, c)| (g, c.iter().sum::<u32>()))
+        .collect();
+    genes_sorted.sort_by(|a, b| a.0.cmp(b.0));
 
-    let gene_breakdowns: HashMap<String, serde_json::Value> = focus_genes.iter()
-        .filter_map(|g| {
-            gene_class.get(g).map(|c| (g.clone(), serde_json::json!({
-                "total": c.iter().sum::<u32>(),
-                "pathogenic": c[0], "likely_pathogenic": c[1],
-                "vus": c[2], "likely_benign": c[3], "benign": c[4],
-                "conflicting": c[5], "other": c[6],
-            })))
+    let chunk_size = 200_000u32;
+    let mut gene_to_chunk: HashMap<String, u32> = HashMap::new();
+    let mut current_chunk = 0u32;
+    let mut current_count = 0u32;
+    for (gene, count) in &genes_sorted {
+        if current_count > 0 && current_count + count > chunk_size {
+            current_chunk += 1;
+            current_count = 0;
+        }
+        gene_to_chunk.insert(gene.to_string(), current_chunk);
+        current_count += count;
+    }
+    let total_chunks = current_chunk + 1;
+
+    tracing::info!("[backfill] Index: {} genes, {} chunks, {} conditions",
+        gene_breakdowns.len(), total_chunks, condition_counts.len());
+
+    // Top 200 conditions
+    let mut top_conditions: Vec<(String, u32)> = condition_counts.into_iter().collect();
+    top_conditions.sort_by(|a, b| b.1.cmp(&a.1));
+    top_conditions.truncate(200);
+
+    let condition_index: Vec<serde_json::Value> = top_conditions.iter().map(|(cond, count)| {
+        let genes: Vec<&String> = condition_genes.get(cond)
+            .map(|s| s.iter().collect())
+            .unwrap_or_default();
+        serde_json::json!({
+            "condition": cond,
+            "count": count,
+            "genes": genes,
+        })
+    }).collect();
+
+    // Chromosome bins (compact: only non-zero bins)
+    let chromosome_bins: HashMap<String, Vec<(u32, u32)>> = chrom_bins.into_iter()
+        .map(|(chr, bins)| {
+            let mut sorted: Vec<(u32, u32)> = bins.into_iter().collect();
+            sorted.sort_by_key(|&(b, _)| b);
+            (chr, sorted)
         })
         .collect();
 
@@ -299,6 +408,11 @@ fn build_index(variants: &[ClinVarVariant], reclassifications: &[Reclassificatio
         "classifications": class_counts,
         "top_genes": top_genes,
         "gene_breakdowns": gene_breakdowns,
+        "by_period": by_period,
+        "gene_to_chunk": gene_to_chunk,
+        "total_chunks": total_chunks,
+        "condition_index": condition_index,
+        "chromosome_bins": chromosome_bins,
         "generated_at": chrono::Utc::now().to_rfc3339(),
     })
 }

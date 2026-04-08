@@ -39,7 +39,7 @@ jobs:
 
       - name: Prepare GitHub Pages
         run: |
-          mkdir -p pages/pkg pages/data
+          mkdir -p pages/pkg pages/data/chunks
           cp web/index.html web/app.js web/style.css web/sw.js pages/
           cp web/pkg/vus_tracker_lib_bg.wasm pages/pkg/
           cp web/pkg/vus_tracker_lib.js pages/pkg/
@@ -59,27 +59,37 @@ jobs:
             CLEAN=$(wc -l < /tmp/variants_clean.jsonl)
             echo "Clean single-gene variants: $CLEAN"
 
-            # Sort by last_evaluated date (ISO format after backfill normalization)
-            echo "Sorting by date..."
-            sort -t'"' -k1,1 -r /tmp/variants_clean.jsonl > /tmp/variants_sorted.jsonl
+            # Sort by gene name (alphabetically) for balanced chunking
+            echo "Sorting by gene name..."
+            python3 -c "
+import json, sys
+lines = open('/tmp/variants_clean.jsonl').readlines()
+lines.sort(key=lambda l: json.loads(l).get('gene', ''))
+with open('/tmp/variants_sorted_by_gene.jsonl', 'w') as f:
+    f.writelines(lines)
+"
+            TOTAL=$(wc -l < /tmp/variants_sorted_by_gene.jsonl)
+            echo "Total sorted variants: $TOTAL"
 
-            # today.jsonl: 500 most recent variants (instant load, ~200 KB)
-            head -500 /tmp/variants_sorted.jsonl > pages/data/today.jsonl
-            echo "Today file: $(wc -l < pages/data/today.jsonl) variants"
-
-            # Extract key genes as separate files (full data per gene)
-            for GENE in LDLR BRCA1 BRCA2 TP53 ATM TTN NF1 MLH1 MSH2 CFTR MYH7 PALB2 SCN5A FBN1 APC; do
-              grep "\"gene\":\"$GENE\"" /tmp/variants_clean.jsonl > "pages/data/gene_${GENE}.jsonl" 2>/dev/null || true
-              COUNT=$(wc -l < "pages/data/gene_${GENE}.jsonl" 2>/dev/null || echo 0)
-              echo "  $GENE: $COUNT variants"
+            # Split into chunks of ~200,000 lines each
+            CHUNK_SIZE=200000
+            split -l $CHUNK_SIZE -d -a 2 /tmp/variants_sorted_by_gene.jsonl /tmp/chunk_
+            IDX=0
+            for PART in /tmp/chunk_*; do
+              DEST=$(printf "pages/data/chunks/chunk_%02d.jsonl" $IDX)
+              mv "$PART" "$DEST"
+              IDX=$((IDX + 1))
             done
+            echo "Created $IDX chunk(s) of up to $CHUNK_SIZE lines each"
 
-            # Main variants: 10k most recent (background load, ~3 MB)
-            head -10000 /tmp/variants_sorted.jsonl > pages/data/variants.jsonl
-            echo "Main load: $(wc -l < pages/data/variants.jsonl) variants"
+            # Log chunk sizes
+            echo "Chunk sizes:"
+            for F in pages/data/chunks/chunk_*.jsonl; do
+              echo "  $(basename $F): $(wc -l < $F) lines, $(du -sh $F | cut -f1)"
+            done
           fi
 
-          echo "Pages data sizes:" && du -sh pages/data/*
+          echo "Pages data sizes:" && du -sh pages/data/* pages/data/chunks/* 2>/dev/null || true
 
       - name: Deploy to gh-pages branch
         run: |
