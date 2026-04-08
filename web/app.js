@@ -102,19 +102,30 @@ function onSearchInput(e) {
   searchTimeout = setTimeout(() => {
     if (!indexCache?.gene_breakdowns) return;
     const keys = Object.keys(indexCache.gene_breakdowns);
-    const matches = [];
+    const geneMatches = [];
     // Exact prefix first, then contains
     for (const g of keys) {
-      if (g.startsWith(q)) matches.push(g);
-      if (matches.length >= 20) break;
+      if (g.startsWith(q)) geneMatches.push(g);
+      if (geneMatches.length >= 20) break;
     }
-    if (matches.length < 20) {
+    if (geneMatches.length < 20) {
       for (const g of keys) {
-        if (!g.startsWith(q) && g.includes(q)) matches.push(g);
-        if (matches.length >= 20) break;
+        if (!g.startsWith(q) && g.includes(q)) geneMatches.push(g);
+        if (geneMatches.length >= 20) break;
       }
     }
-    showAutocomplete(matches);
+    // If few gene matches, also search conditions
+    const conditionMatches = [];
+    if (geneMatches.length < 10 && indexCache.condition_index) {
+      const qLower = q.toLowerCase();
+      for (const cond of Object.keys(indexCache.condition_index)) {
+        if (cond.toLowerCase().includes(qLower)) {
+          conditionMatches.push(cond);
+          if (conditionMatches.length >= (20 - geneMatches.length)) break;
+        }
+      }
+    }
+    showAutocomplete(geneMatches, conditionMatches);
   }, 200);
 }
 
@@ -133,10 +144,10 @@ function onSearchKeydown(e) {
     highlightAcItem(items);
   } else if (e.key === 'Enter') {
     e.preventDefault();
-    if (acIndex >= 0 && items[acIndex]) {
-      selectGene(items[acIndex].dataset.gene);
-    } else if (items.length === 1) {
-      selectGene(items[0].dataset.gene);
+    const sel = (acIndex >= 0 && items[acIndex]) ? items[acIndex] : (items.length === 1 ? items[0] : null);
+    if (sel) {
+      if (sel.dataset.condition) selectCondition(sel.dataset.condition);
+      else if (sel.dataset.gene) selectGene(sel.dataset.gene);
     }
   } else if (e.key === 'Escape') {
     hideAutocomplete();
@@ -147,21 +158,32 @@ function highlightAcItem(items) {
   items.forEach((el, i) => el.classList.toggle('selected', i === acIndex));
 }
 
-function showAutocomplete(genes) {
+function showAutocomplete(genes, conditions) {
   const ac = document.getElementById('autocomplete');
   acIndex = -1;
-  if (!genes.length) {
+  conditions = conditions || [];
+  if (!genes.length && !conditions.length) {
     ac.innerHTML = '<div class="ac-item" style="color:#94a3b8;pointer-events:none">No genes found</div>';
     ac.classList.add('visible');
     return;
   }
-  ac.innerHTML = genes.map(g => {
+  let html = genes.map(g => {
     const bd = indexCache.gene_breakdowns[g];
     return `<div class="ac-item" data-gene="${esc(g)}" onclick="selectGene('${esc(g)}')">`
       + `<span>${esc(g)}</span>`
       + `<span class="ac-count">${formatNumber(bd?.total || 0)}</span>`
       + `</div>`;
   }).join('');
+  if (conditions.length) {
+    html += conditions.map(c => {
+      const count = indexCache.condition_index[c]?.length || 0;
+      return `<div class="ac-item" data-condition="${esc(c)}" onclick="selectCondition('${esc(c)}')" style="border-left:2px solid #8b5cf6;">`
+        + `<span style="font-size:9px;color:#8b5cf6;">\u25C6</span> <span style="font-size:10px;">${esc(c.substring(0, 50))}</span>`
+        + `<span class="ac-count">${count} genes</span>`
+        + `</div>`;
+    }).join('');
+  }
+  ac.innerHTML = html;
   ac.classList.add('visible');
 }
 
@@ -194,6 +216,32 @@ window.selectGene = async function (gene) {
   if (chunkId != null && loadedChunks.has(chunkId)) {
     renderGeneFocus(gene);
     renderVariantList();
+    renderHotspots('hotspot-view', gene);
+  }
+};
+
+window.selectCondition = async function (condition) {
+  hideAutocomplete();
+  document.getElementById('search').value = condition;
+  const el = document.getElementById('variant-list');
+  if (!tracker) {
+    el.innerHTML = '<div style="color:#94a3b8;font-size:10px;">Load gene data first to filter by condition.</div>';
+    return;
+  }
+  showLoading('filtering by condition...');
+  try {
+    const result = JSON.parse(tracker.filter_by_condition(condition));
+    hideLoading();
+    if (!result.variants || !result.variants.length) {
+      el.innerHTML = `<div style="color:#94a3b8;font-size:10px;padding:4px 0;">No variants found for "${esc(condition.substring(0, 50))}".</div>`;
+      return;
+    }
+    const header = `<div style="color:#8b5cf6;font-size:9px;margin-bottom:2px;">${formatNumber(result.variants.length)} variants for "${esc(condition.substring(0, 40))}"</div>`;
+    const rows = result.variants.slice(0, 50).map((v, i) => renderVariantRow(v, i)).join('');
+    el.innerHTML = header + rows;
+  } catch (e) {
+    hideLoading();
+    el.innerHTML = '<div style="color:#dc2626;font-size:10px;">Condition filter error.</div>';
   }
 };
 
@@ -812,6 +860,14 @@ function renderStats(period) {
       renderChangesHeatmap('stats-heatmap');
     }
   }
+
+  // Render ideogram from index (no chunk needed)
+  renderIdeogram('ideogram-view');
+
+  // Render hotspots if gene data loaded
+  if (tracker && focusGene && loadedChunks.size > 0) {
+    renderHotspots('hotspot-view', focusGene);
+  }
 }
 
 // ── Report Date ─────────────────────────────────────────────
@@ -1052,6 +1108,101 @@ function shortClass(c) {
   if (l.includes('benign')) return 'benign';
   if (l.includes('conflicting')) return 'confl.';
   return '?';
+}
+
+// ── Hotspot Visualization ──────────────────────────────────
+
+function renderHotspots(containerId, gene) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!tracker || !loadedChunks.size) { el.innerHTML = ''; return; }
+  let data;
+  try { data = JSON.parse(tracker.detect_hotspots(gene, 500)); } catch (e) { el.innerHTML = ''; return; }
+  if (!data.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:9px;">No hotspots detected</div>'; return; }
+
+  const minPos = Math.min(...data.map(d => d.start));
+  const maxPos = Math.max(...data.map(d => d.end));
+  const span = maxPos - minPos || 1;
+  const w = 400, h = 40;
+
+  const blocks = data.map(d => {
+    const x = ((d.start - minPos) / span) * (w - 20) + 10;
+    const bw = Math.max(2, ((d.end - d.start) / span) * (w - 20));
+    const pathFrac = d.total ? (d.pathogenic || 0) / d.total : 0;
+    const r = Math.round(100 + pathFrac * 155);
+    const g = Math.round(60 - pathFrac * 40);
+    const b = Math.round(60 - pathFrac * 40);
+    const color = `rgb(${r},${g},${b})`;
+    return `<rect x="${x}" y="8" width="${bw}" height="20" rx="2" fill="${color}" opacity="0.85">`
+      + `<title>${d.region || ''}: ${d.total} variants (${d.pathogenic || 0} path.)</title></rect>`;
+  }).join('');
+
+  // Gene track background
+  el.innerHTML = `<div class="section-title">Hotspots \u2014 ${esc(gene)}</div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
+      <rect x="10" y="16" width="${w - 20}" height="4" rx="2" fill="#e2e8f0"/>
+      ${blocks}
+      <text x="10" y="${h - 2}" fill="#94a3b8" font-size="5">${minPos.toLocaleString()}</text>
+      <text x="${w - 10}" y="${h - 2}" text-anchor="end" fill="#94a3b8" font-size="5">${maxPos.toLocaleString()}</text>
+    </svg>`;
+}
+
+// ── Chromosome Ideogram ────────────────────────────────────
+
+function renderIdeogram(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const bins = indexCache?.chromosome_bins;
+  if (!bins) { el.innerHTML = ''; return; }
+
+  const chrLengths = {
+    chr1:248,chr2:242,chr3:198,chr4:190,chr5:181,chr6:170,chr7:159,chr8:145,
+    chr9:138,chr10:133,chr11:135,chr12:133,chr13:114,chr14:107,chr15:101,
+    chr16:90,chr17:83,chr18:80,chr19:58,chr20:64,chr21:46,chr22:50,chrX:156,chrY:57
+  };
+  const chrOrder = Object.keys(chrLengths);
+  const maxLen = 248;
+  const w = 400, h = 120;
+  const barW = 12, gap = (w - 10) / chrOrder.length;
+
+  // Find max bin count for color scaling
+  let maxCount = 1;
+  for (const chr of chrOrder) {
+    const cb = bins[chr];
+    if (cb) Object.values(cb).forEach(v => { if (v > maxCount) maxCount = v; });
+  }
+
+  const elements = chrOrder.map((chr, i) => {
+    const x = 5 + i * gap;
+    const chrH = (chrLengths[chr] / maxLen) * (h - 30);
+    const y0 = h - 16 - chrH;
+    const cb = bins[chr] || {};
+
+    // Background chromosome bar
+    let parts = `<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" rx="3" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="0.5"/>`;
+
+    // Density bands per 1MB bin
+    const binKeys = Object.keys(cb).map(Number).sort((a, b) => a - b);
+    for (const pos of binKeys) {
+      const count = cb[pos];
+      const frac = count / maxCount;
+      const by = y0 + (pos / (chrLengths[chr] * 1e6 || 1)) * chrH;
+      const bh = Math.max(1, (1 / (chrLengths[chr] || 1)) * chrH);
+      const intensity = Math.round(frac * 255);
+      const color = `rgb(${15 - Math.round(frac * 15)},${118 - Math.round(frac * 48)},${110 - Math.round(frac * 40)})`;
+      parts += `<rect x="${x}" y="${by}" width="${barW}" height="${bh}" fill="${color}" opacity="${0.3 + frac * 0.7}"><title>${chr}:${pos} \u2014 ${count} variants</title></rect>`;
+    }
+
+    // Label
+    const label = chr.replace('chr', '');
+    parts += `<text x="${x + barW / 2}" y="${h - 4}" text-anchor="middle" fill="#64748b" font-size="5">${label}</text>`;
+    return parts;
+  }).join('');
+
+  el.innerHTML = `<div class="section-title">Chromosome Ideogram</div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
+      ${elements}
+    </svg>`;
 }
 
 // ── Embed mode ──────────────────────────────────────────────
