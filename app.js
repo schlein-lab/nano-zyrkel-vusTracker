@@ -46,7 +46,11 @@ async function init() {
     const params = new URLSearchParams(window.location.search);
     if (params.get('embed') === 'true') document.body.classList.add('embed');
     const urlGene = params.get('gene');
-    await selectGene(urlGene ? urlGene.toUpperCase() : 'LDLR');
+    if (urlGene) {
+      await selectGene(urlGene.toUpperCase());
+    } else {
+      renderOverview();
+    }
   } catch (e) {
     console.error('Init failed:', e);
     $('hero-number').textContent = 'Error'; $('hero-subtitle').textContent = e.message;
