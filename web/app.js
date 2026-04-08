@@ -217,6 +217,8 @@ window.selectGene = async function (gene) {
     renderGeneFocus(gene);
     renderVariantList();
     renderHotspots('hotspot-view', gene);
+    renderConcordance('concordance-view', gene);
+    renderDrift('drift-view', gene);
   }
 };
 
@@ -868,6 +870,16 @@ function renderStats(period) {
   if (tracker && focusGene && loadedChunks.size > 0) {
     renderHotspots('hotspot-view', focusGene);
   }
+
+  // Render concordance analysis
+  if (tracker && focusGene && loadedChunks.size > 0) {
+    renderConcordance('concordance-view', focusGene);
+  }
+
+  // Render classification drift
+  if (tracker && focusGene && loadedChunks.size > 0) {
+    renderDrift('drift-view', focusGene);
+  }
 }
 
 // ── Report Date ─────────────────────────────────────────────
@@ -1202,6 +1214,128 @@ function renderIdeogram(containerId) {
   el.innerHTML = `<div class="section-title">Chromosome Ideogram</div>
     <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
       ${elements}
+    </svg>`;
+}
+
+// ── Concordance Analysis ──────────────────────────────────
+
+function renderConcordance(containerId, gene) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!tracker || !loadedChunks.size) { el.innerHTML = ''; return; }
+  let data;
+  try { data = JSON.parse(tracker.concordance_analysis(gene)); } catch (e) { el.innerHTML = ''; return; }
+  if (!data.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:9px;">No concordance data</div>'; return; }
+
+  // Show max 20 rows, sorted by discordance (already sorted from WASM)
+  const rows = data.slice(0, 20);
+  const tableRows = rows.map(r => {
+    const score = r.discordance_score || 0;
+    const barWidth = Math.round(score * 60);
+    const red = Math.round(score * 220 + 35);
+    const green = Math.round((1 - score) * 180 + 40);
+    const barColor = `rgb(${red},${green},60)`;
+    const barSvg = `<svg width="64" height="10" style="vertical-align:middle;"><rect x="0" y="1" width="${barWidth}" height="8" rx="2" fill="${barColor}"/><rect x="0" y="1" width="60" height="8" rx="2" fill="none" stroke="#e2e8f0" stroke-width="0.5"/></svg>`;
+    return `<tr>
+      <td style="font-size:9px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.hgvs)}">${esc(r.hgvs)}</td>
+      <td><span class="badge ${badgeClass(r.classification)}" style="font-size:8px;">${esc(r.classification)}</span></td>
+      <td style="font-size:8px;color:#64748b;">${esc(r.submitter)}</td>
+      <td>${barSvg}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<div class="section-title">Submitter Concordance \u2014 ${esc(gene)}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:9px;">
+      <thead><tr style="color:#94a3b8;text-align:left;">
+        <th>Variant</th><th>Class</th><th>Submitters</th><th>Discordance</th>
+      </tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>`;
+}
+
+function badgeClass(cls) {
+  if (!cls) return '';
+  const l = cls.toLowerCase();
+  if (l.includes('path')) return 'badge-path';
+  if (l === 'vus') return 'badge-vus';
+  if (l.includes('ben')) return 'badge-benign';
+  return '';
+}
+
+// ── Classification Drift ──────────────────────────────────
+
+function renderDrift(containerId, gene) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!tracker || !loadedChunks.size) { el.innerHTML = ''; return; }
+  let data;
+  try { data = JSON.parse(tracker.classification_drift(gene)); } catch (e) { el.innerHTML = ''; return; }
+  if (!data.snapshots || !data.snapshots.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:9px;">No drift data</div>'; return; }
+
+  const snaps = data.snapshots;
+  const w = 400, h = 80;
+  const n = snaps.length;
+  if (n < 2) { el.innerHTML = '<div style="color:#94a3b8;font-size:9px;">Need 2+ months for drift</div>'; return; }
+
+  // Build 100% stacked area paths
+  const xStep = (w - 20) / (n - 1);
+  let pathPoints = [], vusPoints = [], benPoints = [];
+
+  for (let i = 0; i < n; i++) {
+    const s = snaps[i];
+    const total = (s.path || 0) + (s.vus || 0) + (s.ben || 0);
+    if (total === 0) {
+      pathPoints.push({ x: 10 + i * xStep, pathY: h - 10, vusY: h - 10, benY: h - 10 });
+      continue;
+    }
+    const pathFrac = (s.path || 0) / total;
+    const vusFrac = (s.vus || 0) / total;
+    const benFrac = (s.ben || 0) / total;
+    const areaH = h - 20;
+    const x = 10 + i * xStep;
+    pathPoints.push({
+      x,
+      pathY: 10 + (1 - pathFrac) * areaH,  // path at top (red)
+      vusY: 10 + (1 - pathFrac - vusFrac) * areaH,  // vus in middle (amber)
+      benY: 10,  // ben at bottom (teal)
+    });
+  }
+
+  // Build SVG path strings for stacked areas
+  // Bottom line (y = h-10)
+  const bottomLine = pathPoints.map(p => `${p.x},${h - 10}`).reverse().join(' ');
+
+  // Path area (top: pathY, bottom: h-10)
+  const pathArea = pathPoints.map(p => `${p.x},${p.pathY}`).join(' ') + ' ' + bottomLine;
+
+  // VUS area (top: vusY, bottom: pathY)
+  const vusTop = pathPoints.map(p => `${p.x},${p.vusY}`).join(' ');
+  const pathBottom = pathPoints.map(p => `${p.x},${p.pathY}`).reverse().join(' ');
+  const vusArea = vusTop + ' ' + pathBottom;
+
+  // Ben area (top: 10, bottom: vusY)
+  const benTop = pathPoints.map(p => `${p.x},10`).join(' ');
+  const vusBottom = pathPoints.map(p => `${p.x},${p.vusY}`).reverse().join(' ');
+  const benArea = benTop + ' ' + vusBottom;
+
+  // X-axis labels (show first, middle, last)
+  const labels = [
+    `<text x="10" y="${h - 1}" fill="#94a3b8" font-size="5">${snaps[0].month}</text>`,
+    `<text x="${w / 2}" y="${h - 1}" text-anchor="middle" fill="#94a3b8" font-size="5">${snaps[Math.floor(n / 2)].month}</text>`,
+    `<text x="${w - 10}" y="${h - 1}" text-anchor="end" fill="#94a3b8" font-size="5">${snaps[n - 1].month}</text>`,
+  ].join('');
+
+  el.innerHTML = `<div class="section-title">Classification Drift \u2014 ${esc(gene)}</div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
+      <polygon points="${benArea}" fill="#0f766e" opacity="0.6"/>
+      <polygon points="${vusArea}" fill="#d97706" opacity="0.6"/>
+      <polygon points="${pathArea}" fill="#dc2626" opacity="0.6"/>
+      ${labels}
+      <text x="${w - 10}" y="8" text-anchor="end" fill="#94a3b8" font-size="5">
+        <tspan fill="#dc2626">\u25CF</tspan> path
+        <tspan fill="#d97706">\u25CF</tspan> VUS
+        <tspan fill="#0f766e">\u25CF</tspan> ben
+      </text>
     </svg>`;
 }
 
