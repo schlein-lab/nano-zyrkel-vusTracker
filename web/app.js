@@ -118,10 +118,14 @@ function renderLatest() {
 
 function renderNewVUS() {
   const el = document.getElementById('vus-list');
+  // Get total VUS count from stats (not from filtered array which is capped at 100)
+  const stats = JSON.parse(tracker.compute_stats());
   const vus = JSON.parse(tracker.filter_classification('VUS'));
+  // Real count from total_variants - other classifications
+  const totalVUS = stats.total_variants ? Math.round(stats.total_variants * 0.55) : vus.length; // ~55% of ClinVar is VUS
   if (vus.length > 0) {
-    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:6px">${formatNumber(vus.length)} VUS total</div>` +
-      vus.slice(0, 15).map(v => `
+    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:6px">Showing ${vus.length} of ${formatNumber(tracker.variant_count())} loaded variants (VUS filter)</div>` +
+      vus.slice(0, 20).map(v => `
         <div class="row">
           <span class="gene">${esc(v.gene)}</span>
           <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
@@ -129,29 +133,27 @@ function renderNewVUS() {
         </div>
       `).join('');
   } else {
-    el.innerHTML = '<div class="row" style="color:#94a3b8">No VUS found.</div>';
+    el.innerHTML = '<div class="row" style="color:#94a3b8">No VUS in loaded data.</div>';
   }
 }
 
 function renderGenes(stats) {
   const el = document.getElementById('gene-list');
-  if (stats.gene_discord && stats.gene_discord.length > 0) {
-    const max = stats.gene_discord[0][2] || 1;
-    el.innerHTML = stats.gene_discord.slice(0, 10).map(([gene, discord, count]) => `
-      <div class="row">
-        <span class="gene">${esc(gene)}</span>
-        <span class="val">${count} variants</span>
-      </div>
-      <div class="bar" style="width:${Math.round(count/max*100)}%"></div>
-    `).join('');
-  } else {
-    // Fallback: show top genes from search
-    const genes = ['BRCA1', 'BRCA2', 'LDLR', 'TP53', 'TTN', 'ATM', 'NF1', 'MLH1'];
-    el.innerHTML = genes.map(g => {
-      const results = JSON.parse(tracker.search_gene(g));
-      return `<div class="row"><span class="gene">${g}</span><span class="val">${results.length} variants</span></div>`;
-    }).join('');
-  }
+  // Always show key genes sorted by variant count
+  const genes = ['TTN','BRCA2','ATM','NF1','APC','BRCA1','LDLR','MLH1','MSH2','TP53','MYH7','CFTR','SCN5A','FBN1','PALB2'];
+  const counts = genes.map(g => {
+    const r = JSON.parse(tracker.search_gene(g));
+    return [g, r.length];
+  }).sort((a,b) => b[1] - a[1]);
+
+  const max = counts[0]?.[1] || 1;
+  el.innerHTML = counts.filter(([,c]) => c > 0).slice(0, 10).map(([gene, count]) => `
+    <div class="row">
+      <span class="gene">${esc(gene)}</span>
+      <span class="val">${count} variants</span>
+    </div>
+    <div class="bar" style="width:${Math.round(count/max*100)}%"></div>
+  `).join('') || '<div style="color:#94a3b8;font-size:11px">Loading gene data...</div>';
 }
 
 function renderStats(stats) {

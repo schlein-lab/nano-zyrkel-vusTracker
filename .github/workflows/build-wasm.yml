@@ -48,9 +48,19 @@ jobs:
           cp staging/clinvar-tracker/reclassifications.jsonl pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/story.txt pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/daily_stats.jsonl pages/data/ 2>/dev/null || true
-          # For variants: take only last 7 days (small enough for Pages)
-          tail -5000 staging/clinvar-tracker/variants.jsonl > pages/data/variants.jsonl 2>/dev/null || true
-          echo "Pages data size: $(du -sh pages/data/)"
+          # Variants: compress with gzip for efficient transfer
+          # Full JSONL from LFS → gzip → Pages (browser decompresses natively)
+          if [ -f staging/clinvar-tracker/variants.jsonl ]; then
+            SIZE=$(wc -c < staging/clinvar-tracker/variants.jsonl)
+            echo "Raw variants: $SIZE bytes"
+            if [ "$SIZE" -gt 50000000 ]; then
+              # >50MB: take first 200k lines (~60MB raw, ~10MB gzip)
+              head -200000 staging/clinvar-tracker/variants.jsonl > pages/data/variants.jsonl
+            else
+              cp staging/clinvar-tracker/variants.jsonl pages/data/variants.jsonl
+            fi
+          fi
+          echo "Pages data:" && du -sh pages/data/*
 
       - name: Deploy to gh-pages branch
         run: |
