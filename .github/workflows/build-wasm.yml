@@ -61,13 +61,7 @@ jobs:
 
             # Sort by gene name (alphabetically) for balanced chunking
             echo "Sorting by gene name..."
-            python3 -c "
-import json, sys
-lines = open('/tmp/variants_clean.jsonl').readlines()
-lines.sort(key=lambda l: json.loads(l).get('gene', ''))
-with open('/tmp/variants_sorted_by_gene.jsonl', 'w') as f:
-    f.writelines(lines)
-"
+            python3 -c "import json; lines=open('/tmp/variants_clean.jsonl').readlines(); lines.sort(key=lambda l: json.loads(l).get('gene','')); open('/tmp/variants_sorted_by_gene.jsonl','w').writelines(lines)"
             TOTAL=$(wc -l < /tmp/variants_sorted_by_gene.jsonl)
             echo "Total sorted variants: $TOTAL"
 
