@@ -1,7 +1,7 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:#fafbfc; color:#1a1a2e; }
 
-.app { max-width:440px; margin:0 auto; border:1px solid #e2e8f0; border-radius:16px; overflow:hidden; background:#fff; }
+.app { max-width:440px; max-height:500px; overflow-y:auto; margin:0 auto; border:1px solid #e2e8f0; border-radius:16px; background:#fff; }
 
 /* Header */
 .header { background:#0f766e; color:#fff; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; }
@@ -85,7 +85,15 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:#fa
 .footer { padding:6px 14px; font-size:8px; color:#cbd5e1; text-align:center; border-top:1px solid #f1f5f9; }
 .footer a { color:#94a3b8; text-decoration:none; }
 .privacy { display:block; margin-top:1px; font-style:italic; }
-.footer-actions { display:flex; gap:4px; justify-content:center; margin:4px 0; }
+/* Time Bar */
+.time-bar { display:flex; gap:3px; padding:4px 14px; border-top:1px solid #f1f5f9; }
+.tb { background:none; border:1px solid #e2e8f0; border-radius:4px; padding:2px 8px; font-size:9px; color:#64748b; cursor:pointer; }
+.tb.active { background:#0f766e; color:#fff; border-color:#0f766e; }
+.tb:hover { border-color:#0f766e; }
+
+/* Export */
+.footer-actions { display:flex; gap:3px; justify-content:center; align-items:center; margin:4px 0; }
+.export-select { font-size:8px; padding:2px 4px; border:1px solid #e2e8f0; border-radius:3px; color:#64748b; background:#fff; }
 .export-btn { background:#0f766e; color:#fff; border:none; border-radius:4px; padding:2px 6px; font-size:8px; cursor:pointer; }
 .export-btn:hover { background:#0d5d57; }
 
