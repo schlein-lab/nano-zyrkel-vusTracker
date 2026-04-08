@@ -86,7 +86,7 @@ impl VusTracker {
         let results: Vec<&ReclassificationEvent> = self.reclassifications.iter()
             .filter(|r| {
                 (upper.is_empty() || r.gene.to_uppercase() == upper)
-                && r.detected_at >= since_date
+                && r.detected_at.as_str() >= since_date
             })
             .collect();
 
