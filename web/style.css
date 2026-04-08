@@ -130,5 +130,33 @@ body.embed #overview-mode, body.embed #gene-mode .vcf-section { display:none; }
 body.embed .header, body.embed .disclaimer { display:none; }
 body.embed .app { border:none; border-radius:0; }
 
+/* Animations */
+@keyframes countUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+@keyframes fadeSlide { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+@keyframes drawIn { from { opacity:0; } to { opacity:1; } }
+.animate-in { animation: fadeSlide 0.3s ease-out forwards; }
+.hero .big-number { animation: countUp 0.5s ease-out; }
+.variant-row { animation: fadeSlide 0.15s ease-out backwards; }
+.variant-row:nth-child(1) { animation-delay: 0.02s; }
+.variant-row:nth-child(2) { animation-delay: 0.04s; }
+.variant-row:nth-child(3) { animation-delay: 0.06s; }
+.variant-row:nth-child(4) { animation-delay: 0.08s; }
+.variant-row:nth-child(5) { animation-delay: 0.10s; }
+.section { animation: fadeSlide 0.3s ease-out backwards; }
+
+/* Collapsible sections */
+.section-title { cursor:pointer; user-select:none; }
+.section-title::after { content:' ▾'; font-size:7px; color:#cbd5e1; }
+.section-title.collapsed::after { content:' ▸'; }
+.section-body { transition: max-height 0.2s ease-out; overflow:hidden; }
+.section-body.collapsed { max-height:0 !important; padding:0; }
+
+/* Donut animation */
+.donut-segment { animation: drawIn 0.4s ease-out forwards; opacity:0; }
+.donut-segment:nth-child(1) { animation-delay: 0.1s; }
+.donut-segment:nth-child(2) { animation-delay: 0.2s; }
+.donut-segment:nth-child(3) { animation-delay: 0.3s; }
+.donut-segment:nth-child(4) { animation-delay: 0.4s; }
+
 /* Responsive */
 @media (max-width:440px) { .app { border:none; border-radius:0; } }
