@@ -16,6 +16,11 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:#fa
 .big-number { font-size:36px; font-weight:700; color:#0f766e; line-height:1; }
 .subtitle { font-size:10px; color:#64748b; margin-top:2px; }
 
+/* Story of the Day */
+.story { padding:8px 14px; border-top:1px solid #f1f5f9; background:#fefce8; }
+.story-label { font-size:8px; text-transform:uppercase; letter-spacing:.1em; color:#ca8a04; font-weight:600; margin-bottom:2px; }
+.story-text { font-size:10px; color:#713f12; line-height:1.4; font-style:italic; }
+
 /* Gene Focus — compact inline breakdown */
 .gene-focus { padding:8px 14px; border-top:1px solid #f1f5f9; background:#f0fdfa; }
 .focus-gene-name { font-size:13px; font-weight:700; color:#0f766e; margin-bottom:4px; }
@@ -76,7 +81,8 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:#fa
 .footer { padding:6px 14px; font-size:8px; color:#cbd5e1; text-align:center; border-top:1px solid #f1f5f9; }
 .footer a { color:#94a3b8; text-decoration:none; }
 .privacy { display:block; margin-top:1px; font-style:italic; }
-.export-btn { background:#0f766e; color:#fff; border:none; border-radius:4px; padding:3px 8px; font-size:9px; cursor:pointer; }
+.footer-actions { display:flex; gap:4px; justify-content:center; margin:4px 0; }
+.export-btn { background:#0f766e; color:#fff; border:none; border-radius:4px; padding:2px 6px; font-size:8px; cursor:pointer; }
 .export-btn:hover { background:#0d5d57; }
 
 /* Embed mode: hide detail section, keep compact */

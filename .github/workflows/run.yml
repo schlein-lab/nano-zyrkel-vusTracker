@@ -52,16 +52,24 @@ jobs:
           RECLASS_FILE="staging/clinvar-tracker/reclassifications.jsonl"
           STORY_FILE="staging/clinvar-tracker/story.txt"
           if [ -s "$RECLASS_FILE" ]; then
-            LAST=$(tail -1 "$RECLASS_FILE")
-            GENE=$(echo "$LAST" | jq -r '.gene // empty')
-            HGVS=$(echo "$LAST" | jq -r '.hgvs // empty' | head -c 50)
-            OLD=$(echo "$LAST" | jq -r '.old // empty')
-            NEW=$(echo "$LAST" | jq -r '.new // empty')
+            # Pick a random clinically interesting classification change:
+            # Prefer VUS→Pathogenic (most impactful), then oldest changes
+            PICK=$(grep '"old":"vus"' "$RECLASS_FILE" | grep '"new":"pathogenic"' | shuf | head -1)
+            if [ -z "$PICK" ]; then
+              # Fallback: oldest classification change (most historical)
+              PICK=$(sort -t'"' -k12 "$RECLASS_FILE" | head -1)
+            fi
+            GENE=$(echo "$PICK" | jq -r '.gene // empty')
+            HGVS=$(echo "$PICK" | jq -r '.hgvs // empty' | head -c 60)
+            OLD=$(echo "$PICK" | jq -r '.old // empty')
+            NEW=$(echo "$PICK" | jq -r '.new // empty')
+            DATE=$(echo "$PICK" | jq -r '.detected_at // empty')
+            SUBMITTER=$(echo "$PICK" | jq -r '.submitter // empty' | head -c 40)
             if [ -n "$GENE" ] && [ -n "$HGVS" ]; then
               codex exec --skip-git-repo-check --ephemeral \
                 -o "$STORY_FILE" \
-                "Write a 3-sentence historical note about the ClinVar classification change of $HGVS in gene $GENE from $OLD to $NEW. Include: what disease this gene is associated with, and the clinical significance of this change. Be factual. English only. No markdown."
-              echo "Story generated for $GENE"
+                "Write a 3-sentence historical note about a ClinVar classification change. Variant: $HGVS in gene $GENE. Changed from $OLD to $NEW on $DATE by $SUBMITTER. Include: (1) what disease this gene is associated with, (2) how long this variant was classified as $OLD before the change, (3) the clinical impact — what does this mean for patients who carry this variant? Be factual, cite the gene's OMIM entry if known. English only. No markdown. No bullet points."
+              echo "Story generated for $GENE ($OLD → $NEW)"
             fi
           else
             echo "No classification changes yet — skipping story"
