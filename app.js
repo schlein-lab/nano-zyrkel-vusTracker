@@ -96,14 +96,34 @@ window.selectGene = async function(gene) {
   if (lastHeroGene !== gene) { animateNumber(heroEl, geneTotal); lastHeroGene = gene; }
   else heroEl.textContent = fmt(geneTotal);
   $('hero-subtitle').textContent = `${esc(gene)} variants tracked`;
+  // Show placeholder sections immediately (before chunk loads)
+  $('variant-list').innerHTML = '<div style="color:#94a3b8;font-size:10px;padding:8px;">Loading variant data...</div>';
+  ['browser-section','drift-section','hotspot-section','timeline-section','concordance-section','survival-section'].forEach(id => {
+    const el = $(id);
+    if (el) el.innerHTML = '<div class="section-title">Loading...</div><div style="color:#94a3b8;font-size:9px;padding:4px 0;">Downloading gene data (~60 MB)...</div>';
+  });
+
+  // Load chunk (60 MB, takes 10-30s)
   const chunkId = indexCache?.gene_to_chunk?.[gene];
   if (chunkId != null && !loadedChunks.has(chunkId)) {
-    showLoading(`loading ${gene} data...`); await loadChunk(chunkId); hideLoading();
+    showLoading(`loading ${gene} data (${chunkId + 1}/22)...`);
+    await loadChunk(chunkId);
+    hideLoading();
   }
+
+  // Render everything after chunk load
   if (chunkId != null && loadedChunks.has(chunkId)) {
-    renderGeneHeader(gene); renderVariantList();
+    renderGeneHeader(gene);
+    renderVariantList();
     renderGenomeBrowser('genome-browser', gene);
-    renderDrift(gene); renderHotspots(gene); renderTimeline(gene); renderConcordance(gene); renderSurvival(gene);
+    renderDrift(gene);
+    renderHotspots(gene);
+    renderTimeline(gene);
+    renderConcordance(gene);
+    renderSurvival(gene);
+  } else {
+    // Chunk failed — show what we can from index.json
+    $('variant-list').innerHTML = '<div style="color:#dc2626;font-size:10px;padding:8px;">Could not load variant data. Try refreshing.</div>';
   }
 };
 
