@@ -87,6 +87,9 @@ function renderAll() {
 
   // Tab 3: Stats
   renderStats(stats);
+
+  // LDLR Showcase
+  renderLDLR();
 }
 
 function renderLatest() {
@@ -178,6 +181,25 @@ function renderStats(stats) {
       document.getElementById('survival-chart').innerHTML = '<div style="color:#94a3b8;font-size:11px">Not enough LDLR data for survival curve yet.</div>';
     }
   } catch(e) {}
+}
+
+function renderLDLR() {
+  const el = document.getElementById('ldlr-stats');
+  if (!el) return;
+  try {
+    const ldlr = JSON.parse(tracker.search_gene('LDLR'));
+    const vus = ldlr.filter(v => shortClass(v.classification) === 'VUS').length;
+    const path = ldlr.filter(v => shortClass(v.classification).includes('path')).length;
+    const benign = ldlr.filter(v => shortClass(v.classification).includes('ben')).length;
+    el.innerHTML = `
+      <div class="row"><span>LDLR variants</span><span class="val">${ldlr.length}</span></div>
+      <div class="row"><span class="badge-sm badge-path">Pathogenic</span><span class="val">${path}</span></div>
+      <div class="row"><span class="badge-sm badge-vus">VUS</span><span class="val">${vus}</span></div>
+      <div class="row"><span class="badge-sm badge-benign">Benign</span><span class="val">${benign}</span></div>
+    `;
+  } catch(e) {
+    el.innerHTML = '<div style="color:#94a3b8;font-size:11px">Loading LDLR data...</div>';
+  }
 }
 
 // ── Search + Panel ───────────────────────────────────────────
@@ -331,6 +353,11 @@ function shortClass(c) {
   if (l.includes('benign')) return 'benign';
   if (l.includes('conflicting')) return 'confl.';
   return '?';
+}
+
+// Embed mode
+if (new URLSearchParams(window.location.search).get('embed') === 'true') {
+  document.body.classList.add('embed');
 }
 
 init();
