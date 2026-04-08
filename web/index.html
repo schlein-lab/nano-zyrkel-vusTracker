@@ -42,6 +42,15 @@
     <div id="focus-stats" class="focus-row"></div>
   </div>
 
+  <!-- Time Range -->
+  <div class="time-bar">
+    <button class="tb active" onclick="setRange('7d')">7d</button>
+    <button class="tb" onclick="setRange('1m')">1m</button>
+    <button class="tb" onclick="setRange('1y')">1y</button>
+    <button class="tb" onclick="setRange('5y')">5y</button>
+    <button class="tb" onclick="setRange('all')">All</button>
+  </div>
+
   <!-- Expandable detail section (hidden by default in embed mode) -->
   <div class="detail-section" id="detail-section">
     <!-- Tabs -->
@@ -94,9 +103,15 @@
   <div class="footer">
     <span>nano-zyrkel · <a href="https://zyrkel.com">zyrkel.com</a></span>
     <div class="footer-actions">
-      <button class="export-btn" onclick="exportCSV()">CSV</button>
-      <button class="export-btn" onclick="exportTSV()">TSV</button>
-      <button class="export-btn" onclick="exportXLSX()">Excel</button>
+      <select id="export-what" class="export-select">
+        <option value="focus">Current gene</option>
+        <option value="changes">Classification changes</option>
+        <option value="top">Top 50 genes</option>
+        <option value="all">All gene breakdowns</option>
+      </select>
+      <button class="export-btn" onclick="doExport('csv')">CSV</button>
+      <button class="export-btn" onclick="doExport('tsv')">TSV</button>
+      <button class="export-btn" onclick="doExport('xls')">Excel</button>
       <button class="export-btn" onclick="shareLink()">Share</button>
     </div>
     <span class="privacy">Genomic data never leaves your browser.</span>
