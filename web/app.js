@@ -54,7 +54,7 @@ async function init() {
     document.getElementById('panel-select').addEventListener('change', onPanelChange);
     setupVCFDrop();
 
-    console.log(`vusTracker: ${tracker.variant_count()} variants, ${tracker.reclass_count()} reclassifications`);
+    console.log(`vusTracker: ${tracker.variant_count()} variants, ${tracker.reclass_count()} classification changes`);
   } catch(e) {
     console.error('Init failed:', e);
     document.getElementById('total-variants').textContent = 'Error';
@@ -97,31 +97,31 @@ function renderLatest() {
   const rCount = tracker.reclass_count();
 
   if (rCount > 0) {
-    // Show actual reclassifications with old → new
-    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:4px">${rCount} reclassifications detected</div>`;
-    // TODO: expose reclassification list from WASM with old/new classification
-    el.innerHTML += '<div style="color:#94a3b8;font-size:11px">Details in Stats tab.</div>';
+    el.innerHTML = `<div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
+      ${formatNumber(rCount)} classification changes detected — a submitter filed a different
+      classification than previous submissions for the same variant.
+      <em>These are computational observations, not clinical reclassifications.</em>
+    </div>`;
+    // Show some recent pathogenic variants as context
+    const pathogenic = JSON.parse(tracker.filter_classification('path.'));
+    const items = (pathogenic.sample || []).slice(0, 10);
+    if (items.length) {
+      el.innerHTML += '<div class="section-title">Recent pathogenic submissions</div>';
+      el.innerHTML += items.map(v => renderCard(v)).join('');
+    }
   } else {
-    // No reclassifications yet — show newest submissions instead
     el.innerHTML = `
       <div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
-        No reclassifications detected yet.<br>
-        The tracker observes ClinVar daily and detects when a variant's classification changes over time.
-        This requires multiple data snapshots — check back in a few days.
+        No classification changes detected yet.<br>
+        The tracker observes ClinVar daily and detects when a variant's classification changes.
+        Check back in a few days.
       </div>
-      <div class="section-title">Newest submissions</div>
     `;
-    // Show some recent pathogenic variants as highlights
     const pathogenic = JSON.parse(tracker.filter_classification('path.'));
-    const items = (pathogenic.sample || pathogenic).slice?.(0, 10) || [];
+    const items = (pathogenic.sample || []).slice(0, 10);
     if (items.length) {
-      el.innerHTML += items.map(v => `
-        <div class="row">
-          <span class="gene">${esc(v.gene)}</span>
-          <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
-          <span class="badge-sm badge-path">path.</span>
-        </div>
-      `).join('');
+      el.innerHTML += '<div class="section-title">Recent pathogenic submissions</div>';
+      el.innerHTML += items.map(v => renderCard(v)).join('');
     }
   }
 }
@@ -170,9 +170,9 @@ function renderStats(stats) {
   const el = document.getElementById('stats-list');
   el.innerHTML = `
     <div class="row"><span>Lab concordance</span><span class="val">${(stats.concordance || 0).toFixed(1)}%</span></div>
-    <div class="row"><span>VUS→path. (30d)</span><span class="val">${stats.vus_to_path_30d || 0}</span></div>
+    <div class="row"><span>VUS→path. shifts (30d)</span><span class="val">${stats.vus_to_path_30d || 0}</span></div>
     <div class="row"><span>Total variants</span><span class="val">${formatNumber(stats.total_variants || 0)}</span></div>
-    <div class="row"><span>Total reclassifications</span><span class="val">${stats.total_reclassifications || 0}</span></div>
+    <div class="row"><span>Classification changes</span><span class="val">${stats.total_reclassifications || 0}</span></div>
     <div class="row"><span>Agent since</span><span class="val">${stats.agent_start_date || '—'}</span></div>
   `;
 
