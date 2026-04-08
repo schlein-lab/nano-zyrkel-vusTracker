@@ -260,16 +260,27 @@ function renderResults(variants, container) {
 }
 
 function renderCard(v) {
+  const sc = shortClass(v.classification);
+  const cardClass = sc.includes('path') && !sc.includes('l.') ? 'card-path'
+    : sc.includes('l.path') ? 'card-lpath'
+    : sc === 'VUS' ? 'card-vus'
+    : sc.includes('l.ben') ? 'card-lben'
+    : sc.includes('benign') ? 'card-ben'
+    : sc.includes('confl') ? 'card-confl' : '';
+
+  // Submitter count shows agreement info
+  const submitterInfo = v.submitter || 'unknown';
+
   return `
-    <div class="card">
+    <div class="card ${cardClass}">
       <div class="card-header">
         <span class="card-gene">${esc(v.gene)}</span>
-        <span class="badge-sm ${badgeClass(v.classification)}">${shortClass(v.classification)}</span>
+        <span class="badge-sm ${badgeClass(v.classification)}">${sc}</span>
       </div>
       <div class="card-hgvs">${esc(v.hgvs || '')}</div>
       <div class="card-meta">
         <span><span class="label">Condition:</span> ${esc((v.condition||'not provided').substring(0,40))}</span>
-        <span><span class="label">Submitter:</span> ${esc((v.submitter||'unknown').substring(0,30))}</span>
+        <span><span class="label">Submissions:</span> ${esc(submitterInfo)}</span>
         <span><span class="label">Evaluated:</span> ${esc(v.last_evaluated||'—')}</span>
         <span><span class="label">Review:</span> ${esc((v.review_status||'').substring(0,25))}</span>
       </div>
