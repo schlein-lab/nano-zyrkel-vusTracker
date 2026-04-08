@@ -60,6 +60,10 @@ jobs:
               cp staging/clinvar-tracker/variants.jsonl pages/data/variants.jsonl
             fi
           fi
+          # Extract key genes as separate files for fast loading
+          for GENE in LDLR BRCA1 BRCA2 TP53 ATM TTN NF1 MLH1 MSH2 CFTR MYH7; do
+            grep "\"gene\":\"$GENE\"" staging/clinvar-tracker/variants.jsonl > "pages/data/gene_${GENE}.jsonl" 2>/dev/null || true
+          done
           echo "Pages data:" && du -sh pages/data/*
 
       - name: Deploy to gh-pages branch
