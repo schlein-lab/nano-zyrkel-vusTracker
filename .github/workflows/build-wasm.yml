@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false  # LFS budget exceeded — chunks generated from NCBI data, not LFS
+          lfs: true  # Chunks stored in LFS (schlein-lab account)
 
       - name: Install Rust + WASM target
         uses: dtolnay/rust-toolchain@stable
@@ -50,24 +50,13 @@ jobs:
           cp staging/clinvar-tracker/daily_stats.jsonl pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/feed.xml pages/ 2>/dev/null || true
 
-          # Generate chunks from variants.jsonl (only if real file, not LFS pointer)
-          if [ -f staging/clinvar-tracker/variants.jsonl ] && head -1 staging/clinvar-tracker/variants.jsonl | grep -q '"gene"'; then
-            echo "Real variants.jsonl found — generating chunks..."
-            grep -v '"gene":"subset of' staging/clinvar-tracker/variants.jsonl \
-              | grep -v '"gene":"[^"]*;' \
-              > /tmp/variants_clean.jsonl
-            CLEAN=$(wc -l < /tmp/variants_clean.jsonl)
-            echo "Clean variants: $CLEAN"
-            python3 -c "import json; lines=open('/tmp/variants_clean.jsonl').readlines(); lines.sort(key=lambda l: json.loads(l).get('gene','')); open('/tmp/variants_sorted.jsonl','w').writelines(lines)"
-            split -l 200000 -d -a 2 /tmp/variants_sorted.jsonl /tmp/chunk_
-            IDX=0
-            for PART in /tmp/chunk_*; do
-              mv "$PART" "$(printf 'pages/data/chunks/chunk_%02d.jsonl' $IDX)"
-              IDX=$((IDX + 1))
-            done
-            echo "Created $IDX chunks"
+          # Copy pre-generated chunks from LFS (897 chunks, ~1.5 MB each)
+          if [ -d staging/clinvar-tracker/chunks ] && ls staging/clinvar-tracker/chunks/chunk_*.jsonl >/dev/null 2>&1; then
+            echo "Copying pre-generated chunks from LFS..."
+            cp staging/clinvar-tracker/chunks/*.jsonl pages/data/chunks/
+            echo "Chunks: $(ls pages/data/chunks/ | wc -l) files, $(du -sh pages/data/chunks/ | cut -f1)"
           else
-            echo "No real variants.jsonl — skipping chunks (existing data on gh-pages preserved)"
+            echo "No chunks in staging — existing data on gh-pages preserved"
           fi
 
       - name: Deploy to gh-pages branch
