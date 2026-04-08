@@ -18,8 +18,15 @@ pub fn run_backfill(path: &str, output_dir: &str) -> Result<()> {
     let deduped = deduplicate(&variants);
     tracing::info!("[backfill] {} unique variants after dedup", deduped.len());
 
-    // Detect historical reclassifications
-    let reclassifications = detect_historical_reclassifications(&variants);
+    // Detect historical reclassifications from submission_summary.txt (if available)
+    let submission_path = path.replace("variant_summary", "submission_summary");
+    let reclassifications = if std::path::Path::new(&submission_path).exists() {
+        tracing::info!("[backfill] Found submission_summary at {}", submission_path);
+        detect_reclassifications_from_submissions(&submission_path)?
+    } else {
+        tracing::info!("[backfill] No submission_summary found — reclassifications will be detected over time");
+        Vec::new()
+    };
     tracing::info!("[backfill] {} historical reclassifications detected", reclassifications.len());
 
     // Build index
@@ -225,4 +232,80 @@ fn save_jsonl<T: serde::Serialize>(path: &str, items: &[T]) -> Result<()> {
         writeln!(writer)?;
     }
     Ok(())
+}
+
+/// Detect reclassifications from submission_summary.txt.
+/// Groups submissions per (VariationID, SubmitterName), sorts by date,
+/// detects when the SAME lab changes classification for the SAME variant.
+///
+/// NOTE: These are UNCURATED computational observations, NOT clinical decisions.
+/// "x of y submissions classify this as pathogenic" — not a diagnosis.
+fn detect_reclassifications_from_submissions(path: &str) -> Result<Vec<ReclassificationEvent>> {
+    use std::io::BufRead;
+
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::with_capacity(2 * 1024 * 1024, file);
+
+    // (variation_id, submitter) → Vec<(date, classification)>
+    let mut submissions: HashMap<(String, String), Vec<(String, Classification)>> = HashMap::new();
+    let mut line_count = 0u64;
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with('#') { continue; }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 11 { continue; }
+
+        let variation_id = fields[0].to_string();
+        let significance = fields[1];
+        let date = fields[2].to_string();
+        let submitter = fields[9].to_string();
+
+        if variation_id.is_empty() || significance == "-" || significance.is_empty() { continue; }
+        if date.is_empty() || date == "-" { continue; }
+
+        submissions.entry((variation_id, submitter))
+            .or_default()
+            .push((date, Classification::from_str(significance)));
+
+        line_count += 1;
+        if line_count % 2_000_000 == 0 {
+            tracing::info!("[backfill] Processed {} submission rows...", line_count);
+        }
+    }
+
+    tracing::info!("[backfill] {} total submissions, {} (variant,submitter) pairs",
+        line_count, submissions.len());
+
+    let mut events = Vec::new();
+    for ((var_id, submitter), mut entries) in submissions {
+        if entries.len() < 2 { continue; }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for window in entries.windows(2) {
+            if window[0].1 != window[1].1 {
+                events.push(ReclassificationEvent {
+                    variation_id: var_id.clone(),
+                    gene: String::new(),
+                    hgvs: String::new(),
+                    old: window[0].1.clone(),
+                    new: window[1].1.clone(),
+                    detected_at: window[1].0.clone(),
+                    submitter: submitter.clone(),
+                });
+            }
+        }
+    }
+
+    tracing::info!("[backfill] Reclassification summary:");
+    tracing::info!("  VUS → Pathogenic: {}",
+        events.iter().filter(|e| matches!(e.old, Classification::Vus) && matches!(e.new, Classification::Pathogenic)).count());
+    tracing::info!("  VUS → Likely Pathogenic: {}",
+        events.iter().filter(|e| matches!(e.old, Classification::Vus) && matches!(e.new, Classification::LikelyPathogenic)).count());
+    tracing::info!("  VUS → Benign/Likely: {}",
+        events.iter().filter(|e| matches!(e.old, Classification::Vus) && matches!(e.new, Classification::Benign | Classification::LikelyBenign)).count());
+    tracing::info!("  Pathogenic → VUS: {}",
+        events.iter().filter(|e| matches!(e.old, Classification::Pathogenic) && matches!(e.new, Classification::Vus)).count());
+
+    Ok(events)
 }
