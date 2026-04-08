@@ -20,23 +20,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
+          mkdir -p /tmp/bin
           gh release download --repo christian-schlein/nano-zyrkel \
-            --pattern "nano-zyrkel-*-linux*" --dir /tmp/bin || \
-          gh release download v0.4.0 --repo christian-schlein/nano-zyrkel \
-            --pattern "nano-zyrkel-*-linux*" --dir /tmp/bin || \
-          echo "No release binary found — building from source as fallback"
-
-          # If no release binary available, build from source
-          if [ ! -f /tmp/bin/nano-zyrkel* ]; then
-            echo "Building from source..."
-            sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
-            git clone --depth 1 https://$GH_TOKEN@github.com/christian-schlein/nano-zyrkel.git /tmp/nano-src
-            cd /tmp/nano-src
-            rustup default stable
-            cargo build --release
-            mkdir -p /tmp/bin
-            cp target/release/nano-zyrkel /tmp/bin/nano-zyrkel
-          fi
+            --pattern "nano-zyrkel-*-linux*" --dir /tmp/bin
           chmod +x /tmp/bin/nano-zyrkel*
           ls -la /tmp/bin/
 
