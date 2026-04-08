@@ -74,7 +74,7 @@ impl VusTracker {
         self.variants.len()
     }
 
-    /// Total number of reclassification events.
+    /// Total number of classification change events.
     pub fn reclass_count(&self) -> usize {
         self.reclassifications.len()
     }

@@ -12,7 +12,7 @@
     "from": "9999",
     "to": "Sep 30, 2025"
   },
-  "generated_at": "2026-04-08T15:02:34.827174400+00:00",
+  "generated_at": "2026-04-08T16:26:54.933596500+00:00",
   "top_genes": [
     [
       "TTN",
@@ -215,6 +215,6 @@
       5355
     ]
   ],
-  "total_reclassifications": 0,
+  "total_reclassifications": 10779,
   "total_variants": 4240266
 }

@@ -22,7 +22,22 @@ pub fn run_backfill(path: &str, output_dir: &str) -> Result<()> {
     let submission_path = path.replace("variant_summary", "submission_summary");
     let reclassifications = if std::path::Path::new(&submission_path).exists() {
         tracing::info!("[backfill] Found submission_summary at {}", submission_path);
-        detect_reclassifications_from_submissions(&submission_path)?
+        let mut reclass = detect_reclassifications_from_submissions(&submission_path)?;
+
+        // Enrich reclassifications with gene/hgvs from variant data
+        let var_lookup: HashMap<&str, &ClinVarVariant> = deduped.iter()
+            .map(|v| (v.variation_id.as_str(), v))
+            .collect();
+        let mut enriched = 0usize;
+        for r in &mut reclass {
+            if let Some(v) = var_lookup.get(r.variation_id.as_str()) {
+                r.gene = v.gene.clone();
+                r.hgvs = v.hgvs.clone();
+                enriched += 1;
+            }
+        }
+        tracing::info!("[backfill] Enriched {}/{} reclassifications with gene/hgvs", enriched, reclass.len());
+        reclass
     } else {
         tracing::info!("[backfill] No submission_summary found — reclassifications will be detected over time");
         Vec::new()
@@ -234,12 +249,12 @@ fn save_jsonl<T: serde::Serialize>(path: &str, items: &[T]) -> Result<()> {
     Ok(())
 }
 
-/// Detect reclassifications from submission_summary.txt.
+/// Detect classification changes from submission_summary.txt.
 /// Groups submissions per (VariationID, SubmitterName), sorts by date,
-/// detects when the SAME lab changes classification for the SAME variant.
+/// detects when the SAME lab files a different classification for the SAME variant.
 ///
-/// NOTE: These are UNCURATED computational observations, NOT clinical decisions.
-/// "x of y submissions classify this as pathogenic" — not a diagnosis.
+/// NOTE: These are UNCURATED computational observations, NOT clinical reclassifications.
+/// A "change" means a submitter filed a different classification — not a clinical decision.
 fn detect_reclassifications_from_submissions(path: &str) -> Result<Vec<ReclassificationEvent>> {
     use std::io::BufRead;
 
@@ -258,11 +273,15 @@ fn detect_reclassifications_from_submissions(path: &str) -> Result<Vec<Reclassif
 
         let variation_id = fields[0].to_string();
         let significance = fields[1];
-        let date = fields[2].to_string();
+        let date_raw = fields[2];
         let submitter = fields[9].to_string();
 
         if variation_id.is_empty() || significance == "-" || significance.is_empty() { continue; }
-        if date.is_empty() || date == "-" { continue; }
+        if date_raw.is_empty() || date_raw == "-" { continue; }
+
+        // Normalize date: "Jun 25, 2024" → "2024-06-25" for correct sorting
+        let date = normalize_date(date_raw);
+        if date.is_empty() { continue; }
 
         submissions.entry((variation_id, submitter))
             .or_default()
@@ -308,4 +327,33 @@ fn detect_reclassifications_from_submissions(path: &str) -> Result<Vec<Reclassif
         events.iter().filter(|e| matches!(e.old, Classification::Pathogenic) && matches!(e.new, Classification::Vus)).count());
 
     Ok(events)
+}
+
+/// Normalize dates from various ClinVar formats to "YYYY-MM-DD".
+/// Handles: "Jun 25, 2024", "2024-06-25", "06/25/2024", etc.
+fn normalize_date(raw: &str) -> String {
+    let raw = raw.trim();
+
+    // Already ISO format?
+    if raw.len() == 10 && raw.chars().nth(4) == Some('-') {
+        return raw.to_string();
+    }
+
+    // Try "Mon DD, YYYY" format (e.g. "Jun 25, 2024")
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, "%b %d, %Y") {
+        return d.to_string();
+    }
+
+    // Try "MM/DD/YYYY"
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, "%m/%d/%Y") {
+        return d.to_string();
+    }
+
+    // Try "YYYY/MM/DD"
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(raw, "%Y/%m/%d") {
+        return d.to_string();
+    }
+
+    // Fallback: return as-is (will still work, just may not sort perfectly)
+    raw.to_string()
 }
