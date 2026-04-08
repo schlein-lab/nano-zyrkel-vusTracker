@@ -29,6 +29,12 @@
     </div>
   </div>
 
+  <!-- Story of the Day (LLM-generated, hidden if empty) -->
+  <div class="story" id="story" style="display:none;">
+    <div class="story-label">Story of the Day</div>
+    <div class="story-text" id="story-text"></div>
+  </div>
+
   <!-- Gene Focus (default: LDLR) — always visible, changes on search -->
   <div class="gene-focus" id="gene-focus">
     <div class="focus-gene-name" id="focus-gene-name">LDLR</div>
@@ -86,7 +92,12 @@
   <!-- Footer -->
   <div class="footer">
     <span>nano-zyrkel · <a href="https://zyrkel.com">zyrkel.com</a></span>
-    <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+    <div class="footer-actions">
+      <button class="export-btn" onclick="exportCSV()">CSV</button>
+      <button class="export-btn" onclick="exportTSV()">TSV</button>
+      <button class="export-btn" onclick="exportXLSX()">Excel</button>
+      <button class="export-btn" onclick="shareLink()">Share</button>
+    </div>
     <span class="privacy">Genomic data never leaves your browser.</span>
   </div>
 </div>
