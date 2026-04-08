@@ -58,15 +58,12 @@ jobs:
             CLEAN=$(wc -l < /tmp/variants_clean.jsonl)
             echo "Clean single-gene variants: $CLEAN"
 
-            # today.jsonl: variants from last 7 days (tiny, instant load)
-            TODAY=$(date -u +%Y-%m-%d)
-            WEEK_AGO=$(date -u -d '7 days ago' +%Y-%m-%d)
-            grep -E "\"last_evaluated\":\"($TODAY|$WEEK_AGO" /tmp/variants_clean.jsonl \
-              > pages/data/today.jsonl 2>/dev/null || true
-            # If that's too few, take last 500 lines as fallback
-            if [ $(wc -l < pages/data/today.jsonl) -lt 50 ]; then
-              tail -500 /tmp/variants_clean.jsonl > pages/data/today.jsonl
-            fi
+            # Sort by last_evaluated date (ISO format after backfill normalization)
+            echo "Sorting by date..."
+            sort -t'"' -k1,1 -r /tmp/variants_clean.jsonl > /tmp/variants_sorted.jsonl
+
+            # today.jsonl: 500 most recent variants (instant load, ~200 KB)
+            head -500 /tmp/variants_sorted.jsonl > pages/data/today.jsonl
             echo "Today file: $(wc -l < pages/data/today.jsonl) variants"
 
             # Extract key genes as separate files (full data per gene)
@@ -76,8 +73,8 @@ jobs:
               echo "  $GENE: $COUNT variants"
             done
 
-            # Main variants: 10k recent single-gene variants (background load)
-            tail -10000 /tmp/variants_clean.jsonl > pages/data/variants.jsonl
+            # Main variants: 10k most recent (background load, ~3 MB)
+            head -10000 /tmp/variants_sorted.jsonl > pages/data/variants.jsonl
             echo "Main load: $(wc -l < pages/data/variants.jsonl) variants"
           fi
 
