@@ -12,7 +12,539 @@
     "from": "1965-01-01",
     "to": "2026-04-02"
   },
-  "generated_at": "2026-04-08T17:05:49.710711700+00:00",
+  "gene_breakdowns": {
+    "ADGRV1": {
+      "benign": 407,
+      "conflicting": 762,
+      "likely_benign": 3144,
+      "likely_pathogenic": 169,
+      "other": 150,
+      "pathogenic": 482,
+      "total": 7128,
+      "vus": 2014
+    },
+    "ALK": {
+      "benign": 145,
+      "conflicting": 371,
+      "likely_benign": 2118,
+      "likely_pathogenic": 6,
+      "other": 75,
+      "pathogenic": 12,
+      "total": 6297,
+      "vus": 3570
+    },
+    "ALMS1": {
+      "benign": 90,
+      "conflicting": 482,
+      "likely_benign": 2628,
+      "likely_pathogenic": 297,
+      "other": 177,
+      "pathogenic": 634,
+      "total": 7428,
+      "vus": 3120
+    },
+    "APC": {
+      "benign": 418,
+      "conflicting": 750,
+      "likely_benign": 1886,
+      "likely_pathogenic": 277,
+      "other": 2621,
+      "pathogenic": 2184,
+      "total": 16815,
+      "vus": 8679
+    },
+    "ATM": {
+      "benign": 421,
+      "conflicting": 1479,
+      "likely_benign": 3601,
+      "likely_pathogenic": 667,
+      "other": 2231,
+      "pathogenic": 2636,
+      "total": 19414,
+      "vus": 8379
+    },
+    "BRCA1": {
+      "benign": 738,
+      "conflicting": 2904,
+      "likely_benign": 2794,
+      "likely_pathogenic": 327,
+      "other": 373,
+      "pathogenic": 4096,
+      "total": 13758,
+      "vus": 2526
+    },
+    "BRCA2": {
+      "benign": 798,
+      "conflicting": 5696,
+      "likely_benign": 4782,
+      "likely_pathogenic": 401,
+      "other": 496,
+      "pathogenic": 5105,
+      "total": 21562,
+      "vus": 4284
+    },
+    "BRIP1": {
+      "benign": 146,
+      "conflicting": 436,
+      "likely_benign": 1110,
+      "likely_pathogenic": 184,
+      "other": 733,
+      "pathogenic": 630,
+      "total": 6439,
+      "vus": 3200
+    },
+    "CDH23": {
+      "benign": 240,
+      "conflicting": 351,
+      "likely_benign": 2727,
+      "likely_pathogenic": 327,
+      "other": 181,
+      "pathogenic": 326,
+      "total": 6242,
+      "vus": 2090
+    },
+    "CFTR": {
+      "benign": 78,
+      "conflicting": 400,
+      "likely_benign": 1482,
+      "likely_pathogenic": 421,
+      "other": 422,
+      "pathogenic": 971,
+      "total": 6254,
+      "vus": 2480
+    },
+    "COL7A1": {
+      "benign": 97,
+      "conflicting": 363,
+      "likely_benign": 3058,
+      "likely_pathogenic": 363,
+      "other": 164,
+      "pathogenic": 592,
+      "total": 6239,
+      "vus": 1602
+    },
+    "DICER1": {
+      "benign": 116,
+      "conflicting": 309,
+      "likely_benign": 2432,
+      "likely_pathogenic": 145,
+      "other": 155,
+      "pathogenic": 631,
+      "total": 7597,
+      "vus": 3809
+    },
+    "DMD": {
+      "benign": 479,
+      "conflicting": 707,
+      "likely_benign": 3189,
+      "likely_pathogenic": 610,
+      "other": 329,
+      "pathogenic": 2662,
+      "total": 11414,
+      "vus": 3438
+    },
+    "DNAH11": {
+      "benign": 970,
+      "conflicting": 752,
+      "likely_benign": 2919,
+      "likely_pathogenic": 158,
+      "other": 254,
+      "pathogenic": 385,
+      "total": 6592,
+      "vus": 1154
+    },
+    "DNAH5": {
+      "benign": 358,
+      "conflicting": 569,
+      "likely_benign": 3044,
+      "likely_pathogenic": 457,
+      "other": 251,
+      "pathogenic": 528,
+      "total": 6684,
+      "vus": 1477
+    },
+    "DSP": {
+      "benign": 117,
+      "conflicting": 745,
+      "likely_benign": 1607,
+      "likely_pathogenic": 195,
+      "other": 250,
+      "pathogenic": 518,
+      "total": 6090,
+      "vus": 2658
+    },
+    "DYNC1H1": {
+      "benign": 199,
+      "conflicting": 404,
+      "likely_benign": 2517,
+      "likely_pathogenic": 123,
+      "other": 138,
+      "pathogenic": 35,
+      "total": 5560,
+      "vus": 2144
+    },
+    "EYS": {
+      "benign": 163,
+      "conflicting": 188,
+      "likely_benign": 1864,
+      "likely_pathogenic": 417,
+      "other": 286,
+      "pathogenic": 655,
+      "total": 5423,
+      "vus": 1850
+    },
+    "FANCA": {
+      "benign": 200,
+      "conflicting": 351,
+      "likely_benign": 2311,
+      "likely_pathogenic": 342,
+      "other": 228,
+      "pathogenic": 780,
+      "total": 6845,
+      "vus": 2633
+    },
+    "FBN1": {
+      "benign": 165,
+      "conflicting": 700,
+      "likely_benign": 1957,
+      "likely_pathogenic": 1134,
+      "other": 598,
+      "pathogenic": 2089,
+      "total": 9348,
+      "vus": 2705
+    },
+    "FLNC": {
+      "benign": 149,
+      "conflicting": 506,
+      "likely_benign": 2059,
+      "likely_pathogenic": 163,
+      "other": 193,
+      "pathogenic": 407,
+      "total": 6181,
+      "vus": 2704
+    },
+    "KMT2D": {
+      "benign": 868,
+      "conflicting": 700,
+      "likely_benign": 2060,
+      "likely_pathogenic": 264,
+      "other": 332,
+      "pathogenic": 704,
+      "total": 7321,
+      "vus": 2393
+    },
+    "LAMA2": {
+      "benign": 188,
+      "conflicting": 353,
+      "likely_benign": 2298,
+      "likely_pathogenic": 437,
+      "other": 175,
+      "pathogenic": 498,
+      "total": 5509,
+      "vus": 1560
+    },
+    "LDLR": {
+      "benign": 89,
+      "conflicting": 332,
+      "likely_benign": 878,
+      "likely_pathogenic": 617,
+      "other": 471,
+      "pathogenic": 1227,
+      "total": 4808,
+      "vus": 1194
+    },
+    "MLH1": {
+      "benign": 199,
+      "conflicting": 533,
+      "likely_benign": 1012,
+      "likely_pathogenic": 349,
+      "other": 600,
+      "pathogenic": 1558,
+      "total": 6392,
+      "vus": 2141
+    },
+    "MSH2": {
+      "benign": 241,
+      "conflicting": 1399,
+      "likely_benign": 1377,
+      "likely_pathogenic": 315,
+      "other": 790,
+      "pathogenic": 1925,
+      "total": 8383,
+      "vus": 2336
+    },
+    "MSH3": {
+      "benign": 94,
+      "conflicting": 224,
+      "likely_benign": 1547,
+      "likely_pathogenic": 115,
+      "other": 127,
+      "pathogenic": 406,
+      "total": 5355,
+      "vus": 2842
+    },
+    "MSH6": {
+      "benign": 207,
+      "conflicting": 1229,
+      "likely_benign": 1181,
+      "likely_pathogenic": 221,
+      "other": 1354,
+      "pathogenic": 1800,
+      "total": 10412,
+      "vus": 4420
+    },
+    "MYH7": {
+      "benign": 152,
+      "conflicting": 514,
+      "likely_benign": 1665,
+      "likely_pathogenic": 249,
+      "other": 179,
+      "pathogenic": 98,
+      "total": 5804,
+      "vus": 2947
+    },
+    "NEB": {
+      "benign": 267,
+      "conflicting": 991,
+      "likely_benign": 5867,
+      "likely_pathogenic": 1002,
+      "other": 432,
+      "pathogenic": 595,
+      "total": 12480,
+      "vus": 3326
+    },
+    "NF1": {
+      "benign": 166,
+      "conflicting": 1261,
+      "likely_benign": 3951,
+      "likely_pathogenic": 628,
+      "other": 767,
+      "pathogenic": 4444,
+      "total": 17103,
+      "vus": 5886
+    },
+    "OBSCN": {
+      "benign": 208,
+      "conflicting": 53,
+      "likely_benign": 2198,
+      "likely_pathogenic": 21,
+      "other": 111,
+      "pathogenic": 34,
+      "total": 5716,
+      "vus": 3091
+    },
+    "PALB2": {
+      "benign": 150,
+      "conflicting": 707,
+      "likely_benign": 944,
+      "likely_pathogenic": 190,
+      "other": 837,
+      "pathogenic": 1106,
+      "total": 6730,
+      "vus": 2796
+    },
+    "PKD1": {
+      "benign": 122,
+      "conflicting": 386,
+      "likely_benign": 774,
+      "likely_pathogenic": 495,
+      "other": 317,
+      "pathogenic": 1540,
+      "total": 6907,
+      "vus": 3273
+    },
+    "PKHD1": {
+      "benign": 217,
+      "conflicting": 456,
+      "likely_benign": 2409,
+      "likely_pathogenic": 937,
+      "other": 353,
+      "pathogenic": 380,
+      "total": 6888,
+      "vus": 2136
+    },
+    "PLEC": {
+      "benign": 188,
+      "conflicting": 660,
+      "likely_benign": 1872,
+      "likely_pathogenic": 42,
+      "other": 137,
+      "pathogenic": 107,
+      "total": 6633,
+      "vus": 3627
+    },
+    "PMS2": {
+      "benign": 168,
+      "conflicting": 550,
+      "likely_benign": 912,
+      "likely_pathogenic": 165,
+      "other": 753,
+      "pathogenic": 756,
+      "total": 6075,
+      "vus": 2771
+    },
+    "POLD1": {
+      "benign": 111,
+      "conflicting": 458,
+      "likely_benign": 2003,
+      "likely_pathogenic": 3,
+      "other": 294,
+      "pathogenic": 3,
+      "total": 5784,
+      "vus": 2912
+    },
+    "POLE": {
+      "benign": 144,
+      "conflicting": 924,
+      "likely_benign": 3738,
+      "likely_pathogenic": 131,
+      "other": 249,
+      "pathogenic": 387,
+      "total": 11013,
+      "vus": 5440
+    },
+    "PTCH1": {
+      "benign": 125,
+      "conflicting": 629,
+      "likely_benign": 1946,
+      "likely_pathogenic": 135,
+      "other": 188,
+      "pathogenic": 601,
+      "total": 6233,
+      "vus": 2609
+    },
+    "RECQL4": {
+      "benign": 53,
+      "conflicting": 182,
+      "likely_benign": 1761,
+      "likely_pathogenic": 72,
+      "other": 101,
+      "pathogenic": 296,
+      "total": 5389,
+      "vus": 2924
+    },
+    "RYR1": {
+      "benign": 322,
+      "conflicting": 751,
+      "likely_benign": 4106,
+      "likely_pathogenic": 343,
+      "other": 267,
+      "pathogenic": 357,
+      "total": 11078,
+      "vus": 4932
+    },
+    "RYR2": {
+      "benign": 397,
+      "conflicting": 673,
+      "likely_benign": 3427,
+      "likely_pathogenic": 148,
+      "other": 212,
+      "pathogenic": 88,
+      "total": 9932,
+      "vus": 4987
+    },
+    "SCN5A": {
+      "benign": 76,
+      "conflicting": 373,
+      "likely_benign": 1384,
+      "likely_pathogenic": 156,
+      "other": 346,
+      "pathogenic": 312,
+      "total": 4972,
+      "vus": 2325
+    },
+    "SMARCA4": {
+      "benign": 83,
+      "conflicting": 505,
+      "likely_benign": 2737,
+      "likely_pathogenic": 117,
+      "other": 163,
+      "pathogenic": 203,
+      "total": 6559,
+      "vus": 2751
+    },
+    "SYNE1": {
+      "benign": 466,
+      "conflicting": 587,
+      "likely_benign": 1895,
+      "likely_pathogenic": 151,
+      "other": 164,
+      "pathogenic": 206,
+      "total": 6997,
+      "vus": 3528
+    },
+    "TP53": {
+      "benign": 118,
+      "conflicting": 524,
+      "likely_benign": 759,
+      "likely_pathogenic": 201,
+      "other": 472,
+      "pathogenic": 770,
+      "total": 3831,
+      "vus": 987
+    },
+    "TSC1": {
+      "benign": 149,
+      "conflicting": 607,
+      "likely_benign": 1122,
+      "likely_pathogenic": 99,
+      "other": 786,
+      "pathogenic": 631,
+      "total": 5640,
+      "vus": 2246
+    },
+    "TSC2": {
+      "benign": 301,
+      "conflicting": 1578,
+      "likely_benign": 2549,
+      "likely_pathogenic": 234,
+      "other": 2199,
+      "pathogenic": 1205,
+      "total": 12421,
+      "vus": 4355
+    },
+    "TTN": {
+      "benign": 481,
+      "conflicting": 4048,
+      "likely_benign": 16011,
+      "likely_pathogenic": 5108,
+      "other": 1161,
+      "pathogenic": 277,
+      "total": 39248,
+      "vus": 12162
+    },
+    "USH2A": {
+      "benign": 306,
+      "conflicting": 456,
+      "likely_benign": 3434,
+      "likely_pathogenic": 736,
+      "other": 528,
+      "pathogenic": 1148,
+      "total": 9696,
+      "vus": 3088
+    },
+    "VPS13B": {
+      "benign": 143,
+      "conflicting": 207,
+      "likely_benign": 2671,
+      "likely_pathogenic": 432,
+      "other": 184,
+      "pathogenic": 637,
+      "total": 6778,
+      "vus": 2504
+    },
+    "ZNF469": {
+      "benign": 36,
+      "conflicting": 467,
+      "likely_benign": 2332,
+      "likely_pathogenic": 25,
+      "other": 152,
+      "pathogenic": 164,
+      "total": 5608,
+      "vus": 2432
+    }
+  },
+  "generated_at": "2026-04-08T17:34:14.520009300+00:00",
   "top_genes": [
     [
       "TTN",
