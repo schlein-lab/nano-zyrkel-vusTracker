@@ -91,5 +91,10 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:#fa
 body.embed .header, body.embed .footer, body.embed .disclaimer { display:none; }
 body.embed .app { border:none; border-radius:0; }
 
+/* Clickable Rows */
+.clickable-row:hover { background:#f0fdfa; }
+.card-expanded { animation: slideDown 0.15s ease-out; }
+@keyframes slideDown { from { opacity:0; max-height:0; } to { opacity:1; max-height:300px; } }
+
 /* Responsive */
 @media (max-width:440px) { .app { border:none; border-radius:0; } }

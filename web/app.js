@@ -102,46 +102,24 @@ function renderLatest() {
       classification than previous submissions for the same variant.
       <em>These are computational observations, not clinical reclassifications.</em>
     </div>`;
-    // Show some recent pathogenic variants as context
-    const pathogenic = JSON.parse(tracker.filter_classification('path.'));
-    const items = (pathogenic.sample || []).slice(0, 10);
-    if (items.length) {
-      el.innerHTML += '<div class="section-title">Recent pathogenic submissions</div>';
-      el.innerHTML += items.map(v => renderCard(v)).join('');
-    }
-  } else {
-    el.innerHTML = `
-      <div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
-        No classification changes detected yet.<br>
-        The tracker observes ClinVar daily and detects when a variant's classification changes.
-        Check back in a few days.
-      </div>
-    `;
-    const pathogenic = JSON.parse(tracker.filter_classification('path.'));
-    const items = (pathogenic.sample || []).slice(0, 10);
-    if (items.length) {
-      el.innerHTML += '<div class="section-title">Recent pathogenic submissions</div>';
-      el.innerHTML += items.map(v => renderCard(v)).join('');
-    }
+  }
+  // Show recent pathogenic submissions as clickable rows
+  const pathogenic = JSON.parse(tracker.filter_classification('path.'));
+  const items = (pathogenic.sample || []).slice(0, 20);
+  if (items.length) {
+    el.innerHTML += '<div class="section-title">Recent pathogenic submissions</div>';
+    el.innerHTML += items.map((v, i) => renderRow(v, i)).join('');
   }
 }
 
 function renderNewVUS() {
   const el = document.getElementById('vus-list');
-  // Get total VUS count from stats (not from filtered array which is capped at 100)
-  const stats = JSON.parse(tracker.compute_stats());
   const vus = JSON.parse(tracker.filter_classification('VUS'));
-  // Real count from total_variants - other classifications
-  const totalVUS = stats.total_variants ? Math.round(stats.total_variants * 0.55) : vus.length; // ~55% of ClinVar is VUS
-  if (vus.length > 0) {
-    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:6px">Showing ${vus.length} of ${formatNumber(tracker.variant_count())} loaded variants (VUS filter)</div>` +
-      vus.slice(0, 20).map(v => `
-        <div class="row">
-          <span class="gene">${esc(v.gene)}</span>
-          <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
-          <span class="badge-sm badge-vus">VUS</span>
-        </div>
-      `).join('');
+  const total = vus.total || 0;
+  const items = vus.sample || [];
+  if (total > 0) {
+    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:6px">${formatNumber(total)} VUS total · showing ${items.length}</div>` +
+      items.slice(0, 20).map((v, i) => renderRow(v, i)).join('');
   } else {
     el.innerHTML = '<div class="row" style="color:#94a3b8">No VUS in loaded data.</div>';
   }
@@ -152,8 +130,8 @@ function renderGenes(stats) {
   // Always show key genes sorted by variant count
   const genes = ['TTN','BRCA2','ATM','NF1','APC','BRCA1','LDLR','MLH1','MSH2','TP53','MYH7','CFTR','SCN5A','FBN1','PALB2'];
   const counts = genes.map(g => {
-    const r = JSON.parse(tracker.search_gene(g));
-    return [g, r.length];
+    const r = JSON.parse(tracker.gene_stats(g));
+    return [g, r.total || 0];
   }).sort((a,b) => b[1] - a[1]);
 
   const max = counts[0]?.[1] || 1;
@@ -210,15 +188,13 @@ async function renderLDLR() {
   } catch(e) {}
 
   try {
-    const ldlr = JSON.parse(tracker.search_gene('LDLR'));
-    const vus = ldlr.filter(v => shortClass(v.classification) === 'VUS').length;
-    const path = ldlr.filter(v => shortClass(v.classification).includes('path')).length;
-    const benign = ldlr.filter(v => shortClass(v.classification).includes('ben')).length;
+    const ldlr = JSON.parse(tracker.gene_stats('LDLR'));
     el.innerHTML = `
-      <div class="row"><span>LDLR variants (all time)</span><span class="val">${formatNumber(ldlr.length)}</span></div>
-      <div class="row"><span class="badge-sm badge-path">Pathogenic</span><span class="val">${path}</span></div>
-      <div class="row"><span class="badge-sm badge-vus">VUS</span><span class="val">${vus}</span></div>
-      <div class="row"><span class="badge-sm badge-benign">Benign</span><span class="val">${benign}</span></div>
+      <div class="row"><span>LDLR variants (all time)</span><span class="val">${formatNumber(ldlr.total)}</span></div>
+      <div class="row"><span class="badge-sm badge-path">Pathogenic / Likely</span><span class="val">${ldlr.pathogenic + ldlr.likely_pathogenic}</span></div>
+      <div class="row"><span class="badge-sm badge-vus">VUS</span><span class="val">${formatNumber(ldlr.vus)}</span></div>
+      <div class="row"><span class="badge-sm badge-benign">Benign / Likely</span><span class="val">${ldlr.benign + ldlr.likely_benign}</span></div>
+      <div class="row"><span class="badge-sm badge-confl">Conflicting</span><span class="val">${ldlr.conflicting}</span></div>
     `;
 
     // Update survival curve with full LDLR data
@@ -237,7 +213,7 @@ function onSearch(e) {
   const q = e.target.value.trim();
   if (q.length < 2) { renderAll(); return; }
   const results = JSON.parse(tracker.search_variant(q));
-  renderResults(results, document.getElementById('reclass-list'));
+  renderResultRows(results, document.getElementById('reclass-list'));
   showTab(0);
 }
 
@@ -245,19 +221,45 @@ function onPanelChange(e) {
   const genes = e.target.value;
   if (!genes) { renderAll(); return; }
   const results = JSON.parse(tracker.panel(genes));
-  renderResults(results, document.getElementById('reclass-list'));
+  renderResultRows(results, document.getElementById('reclass-list'));
   document.getElementById('reclass-list').insertAdjacentHTML('afterbegin',
     `<div class="row" style="color:#64748b;margin-bottom:4px">${results.length} variants in panel</div>`);
   showTab(0);
 }
 
-function renderResults(variants, container) {
+function renderResultRows(variants, container) {
   if (!variants.length) {
     container.innerHTML = '<div class="row" style="color:#94a3b8">No results.</div>';
     return;
   }
-  container.innerHTML = variants.slice(0, 20).map(v => renderCard(v)).join('');
+  container.innerHTML = variants.slice(0, 30).map((v, i) => renderRow(v, i)).join('');
 }
+
+function renderRow(v, idx) {
+  const sc = shortClass(v.classification);
+  return `
+    <div class="row clickable-row" onclick="toggleCard(this, ${idx})" style="cursor:pointer;" data-variant='${esc(JSON.stringify(v))}'>
+      <span class="gene">${esc(v.gene)}</span>
+      <span class="hgvs">${esc((v.hgvs||'').substring(0, 35))}</span>
+      <span class="badge-sm ${badgeClass(v.classification)}">${sc}</span>
+    </div>
+  `;
+}
+
+window.toggleCard = function(rowEl, idx) {
+  const next = rowEl.nextElementSibling;
+  if (next && next.classList.contains('card-expanded')) {
+    next.remove();
+    return;
+  }
+  // Remove any other expanded card
+  document.querySelectorAll('.card-expanded').forEach(c => c.remove());
+  try {
+    const v = JSON.parse(rowEl.dataset.variant);
+    const cardHtml = `<div class="card-expanded">${renderCard(v)}</div>`;
+    rowEl.insertAdjacentHTML('afterend', cardHtml);
+  } catch(e) {}
+};
 
 function renderCard(v) {
   const sc = shortClass(v.classification);
