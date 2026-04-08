@@ -2,6 +2,7 @@
 // All computation runs locally. No data leaves the browser.
 
 let tracker = null;
+let indexCache = null;
 const DATA_BASE = '.';
 
 async function init() {
@@ -13,13 +14,12 @@ async function init() {
     document.getElementById('total-variants').textContent = 'Loading...';
 
     // Phase 1: Load index (tiny, instant) for hero numbers
-    let indexData = null;
     try {
       const idxResp = await fetch(`${DATA_BASE}/data/index.json`);
       if (idxResp.ok) {
-        indexData = await idxResp.json();
-        document.getElementById('total-variants').textContent = formatNumber(indexData.total_variants || 0);
-        document.getElementById('delta').textContent = `${formatNumber(indexData.total_reclassifications || 0)} classification changes`;
+        indexCache = await idxResp.json();
+        document.getElementById('total-variants').textContent = formatNumber(indexCache.total_variants || 0);
+        document.getElementById('delta').textContent = `${formatNumber(indexCache.total_reclassifications || 0)} classification changes`;
       }
     } catch(e) {}
 
@@ -84,50 +84,51 @@ async function init() {
 function renderAll() {
   if (!tracker) return;
 
-  // Hero
-  const total = tracker.variant_count();
-  document.getElementById('total-variants').textContent = formatNumber(total);
+  // Hero — always use index.json for real totals (not loaded subset)
+  if (indexCache) {
+    document.getElementById('total-variants').textContent = formatNumber(indexCache.total_variants || 0);
+    document.getElementById('delta').textContent = `${formatNumber(indexCache.total_reclassifications || 0)} classification changes`;
+    document.getElementById('trend').textContent =
+      `${indexCache.date_range?.from || ''} — ${indexCache.date_range?.to || ''}`;
+  }
 
-  // Stats
-  const stats = JSON.parse(tracker.compute_stats());
-  document.getElementById('delta').textContent = `${stats.new_vus_today || 0} new VUS today`;
-  document.getElementById('trend').textContent = stats.monthly_trend ? stats.monthly_trend[1] : '';
-
-  // Tab 0: Latest (recent reclassifications OR newest variants)
+  // Tab 0: Latest
   renderLatest();
 
   // Tab 1: Classification Changes
   renderChanges();
 
-  // Tab 2: Genes
-  renderGenes(stats);
+  // Tab 2: Genes (from index.json, not loaded subset)
+  renderGenes();
 
-  // Tab 3: Stats
-  renderStats(stats);
+  // Tab 3: Stats (from index.json)
+  renderStats();
 
-  // LDLR Showcase
-  renderLDLR();
+  // Gene Focus (default: LDLR)
+  renderGeneFocus(focusGene);
 }
 
 function renderLatest() {
   const el = document.getElementById('reclass-list');
 
   // Show mix of recent variants across classifications
+  // Totals come from index.json (real numbers), not from loaded subset
   const categories = [
-    { key: 'path.', label: 'Pathogenic', limit: 5 },
-    { key: 'VUS', label: 'VUS', limit: 5 },
-    { key: 'l.path.', label: 'Likely Pathogenic', limit: 3 },
-    { key: 'l.ben.', label: 'Likely Benign', limit: 3 },
-    { key: 'confl.', label: 'Conflicting', limit: 4 },
+    { key: 'path.', label: 'Pathogenic', indexKey: 'path.', limit: 5 },
+    { key: 'VUS', label: 'VUS', indexKey: 'VUS', limit: 5 },
+    { key: 'l.path.', label: 'Likely Pathogenic', indexKey: 'l.path.', limit: 3 },
+    { key: 'l.ben.', label: 'Likely Benign', indexKey: 'l.ben.', limit: 3 },
+    { key: 'confl.', label: 'Conflicting', indexKey: 'confl.', limit: 4 },
   ];
 
   let html = '';
   for (const cat of categories) {
     const data = JSON.parse(tracker.filter_classification(cat.key));
-    const items = (data.sample || []).slice(0, cat.limit);
-    const total = data.total || 0;
+    const items = (data.sample || data || []).slice(0, cat.limit);
+    // Use real total from index.json, not from loaded subset
+    const realTotal = indexCache?.classifications?.[cat.indexKey] || data.total || items.length;
     if (items.length) {
-      html += `<div class="section-title" style="margin-top:8px">${cat.label} <span style="font-weight:400">(${formatNumber(total)} total)</span></div>`;
+      html += `<div class="section-title" style="margin-top:8px">${cat.label} <span style="font-weight:400">(${formatNumber(realTotal)} in ClinVar)</span></div>`;
       html += items.map((v, i) => renderRow(v, i)).join('');
     }
   }
@@ -136,105 +137,98 @@ function renderLatest() {
 
 function renderChanges() {
   const el = document.getElementById('vus-list');
-  const rCount = tracker.reclass_count();
-  if (rCount > 0) {
-    el.innerHTML = `<div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
-      ${formatNumber(rCount)} classification changes detected across all loaded data.<br>
-      A "change" means the same submitter filed a different classification for a variant over time.
-      <em>These are computational observations, not clinical reclassifications.</em>
-    </div>`;
-    // Show breakdown
-    const stats = JSON.parse(tracker.compute_stats());
-    el.innerHTML += `
-      <div class="section-title">Breakdown</div>
-      <div class="row"><span>Total changes</span><span class="val">${formatNumber(rCount)}</span></div>
-      <div class="row"><span>VUS → path. shifts (30d)</span><span class="val">${stats.vus_to_path_30d || 0}</span></div>
-    `;
-  } else {
-    el.innerHTML = '<div style="color:#94a3b8;font-size:11px">No classification changes in loaded data.</div>';
-  }
+  const rCount = indexCache?.total_reclassifications || tracker.reclass_count();
+  el.innerHTML = `<div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
+    ${formatNumber(rCount)} classification changes detected across all ClinVar data.<br>
+    A "change" means the same submitter filed a different classification for a variant over time.
+    <em>These are computational observations, not clinical reclassifications.</em>
+  </div>`;
+  el.innerHTML += `
+    <div class="section-title">Summary</div>
+    <div class="row"><span>Total changes</span><span class="val">${formatNumber(rCount)}</span></div>
+    <div class="row"><span>Total variants tracked</span><span class="val">${formatNumber(indexCache?.total_variants || 0)}</span></div>
+  `;
 }
 
-function renderGenes(stats) {
+function renderGenes() {
   const el = document.getElementById('gene-list');
-  // Always show key genes sorted by variant count
-  const genes = ['TTN','BRCA2','ATM','NF1','APC','BRCA1','LDLR','MLH1','MSH2','TP53','MYH7','CFTR','SCN5A','FBN1','PALB2'];
-  const counts = genes.map(g => {
-    const r = JSON.parse(tracker.gene_stats(g));
-    return [g, r.total || 0];
-  }).sort((a,b) => b[1] - a[1]);
-
-  const max = counts[0]?.[1] || 1;
-  el.innerHTML = counts.filter(([,c]) => c > 0).slice(0, 10).map(([gene, count]) => `
+  // Use top_genes from index.json (real counts over 4.2M variants)
+  const topGenes = indexCache?.top_genes || [];
+  if (!topGenes.length) {
+    el.innerHTML = '<div style="color:#94a3b8;font-size:11px">Loading gene data...</div>';
+    return;
+  }
+  const max = topGenes[0]?.[1] || 1;
+  el.innerHTML = topGenes.slice(0, 15).map(([gene, count]) => `
     <div class="row">
       <span class="gene">${esc(gene)}</span>
-      <span class="val">${count} variants</span>
+      <span class="val">${formatNumber(count)} variants</span>
     </div>
     <div class="bar" style="width:${Math.round(count/max*100)}%"></div>
-  `).join('') || '<div style="color:#94a3b8;font-size:11px">Loading gene data...</div>';
+  `).join('');
 }
 
-function renderStats(stats) {
+function renderStats() {
   const el = document.getElementById('stats-list');
-  el.innerHTML = `
-    <div class="row"><span>Lab concordance</span><span class="val">${(stats.concordance || 0).toFixed(1)}%</span></div>
-    <div class="row"><span>VUS→path. shifts (30d)</span><span class="val">${stats.vus_to_path_30d || 0}</span></div>
-    <div class="row"><span>Total variants</span><span class="val">${formatNumber(stats.total_variants || 0)}</span></div>
-    <div class="row"><span>Classification changes</span><span class="val">${stats.total_reclassifications || 0}</span></div>
-    <div class="row"><span>Agent since</span><span class="val">${stats.agent_start_date || '—'}</span></div>
-  `;
-
-  // VUS half-life
-  if (stats.vus_half_life_by_gene && stats.vus_half_life_by_gene.length) {
-    el.innerHTML += '<div class="section-title" style="margin-top:10px">VUS half-life (median days)</div>';
-    stats.vus_half_life_by_gene.slice(0, 8).forEach(([gene, days]) => {
-      el.innerHTML += `<div class="row"><span class="gene">${esc(gene)}</span><span class="val">${Math.round(days)}d</span></div>`;
-    });
+  if (!indexCache) {
+    el.innerHTML = '<div style="color:#94a3b8">Loading stats...</div>';
+    return;
   }
 
-  // LDLR survival curve
+  const c = indexCache.classifications || {};
+  const total = indexCache.total_variants || 0;
+  const vusCount = c['VUS'] || 0;
+  const pathCount = (c['path.'] || 0) + (c['l.path.'] || 0);
+  const benCount = (c['benign'] || 0) + (c['l.ben.'] || 0);
+  const conflCount = c['confl.'] || 0;
+  const vusPercent = total ? ((vusCount / total) * 100).toFixed(1) : 0;
+
+  el.innerHTML = `
+    <div class="row"><span>Total variants in ClinVar</span><span class="val">${formatNumber(total)}</span></div>
+    <div class="row"><span>VUS</span><span class="val">${formatNumber(vusCount)} (${vusPercent}%)</span></div>
+    <div class="row"><span>Pathogenic / Likely</span><span class="val">${formatNumber(pathCount)}</span></div>
+    <div class="row"><span>Benign / Likely</span><span class="val">${formatNumber(benCount)}</span></div>
+    <div class="row"><span>Conflicting</span><span class="val">${formatNumber(conflCount)}</span></div>
+    <div class="row"><span>Classification changes</span><span class="val">${formatNumber(indexCache.total_reclassifications || 0)}</span></div>
+    <div class="row"><span>Date range</span><span class="val">${indexCache.date_range?.from || '?'} — ${indexCache.date_range?.to || '?'}</span></div>
+    <div class="row"><span>Generated</span><span class="val">${(indexCache.generated_at || '').substring(0, 10)}</span></div>
+  `;
+
+  // LDLR survival curve (only if enough LDLR data loaded)
   try {
     const curve = JSON.parse(tracker.vus_survival_curve('LDLR'));
     if (curve.length > 2) {
       document.getElementById('survival-chart').innerHTML = renderSurvivalSVG(curve);
     } else {
-      document.getElementById('survival-chart').innerHTML = '<div style="color:#94a3b8;font-size:11px">Not enough LDLR data for survival curve yet.</div>';
+      document.getElementById('survival-chart').innerHTML = '<div style="color:#94a3b8;font-size:11px">Load LDLR gene data for survival curve.</div>';
     }
   } catch(e) {}
 }
 
-async function renderLDLR() {
-  const el = document.getElementById('ldlr-stats');
-  if (!el) return;
+let focusGene = 'LDLR';
 
-  // Try loading dedicated LDLR gene file (all LDLR variants)
-  try {
-    const resp = await fetch(`${DATA_BASE}/data/gene_LDLR.jsonl`);
-    if (resp.ok) {
-      const text = await resp.text();
-      tracker.load_variants(text); // Append to existing data
-      console.log('LDLR gene file loaded');
-    }
-  } catch(e) {}
+function renderGeneFocus(gene) {
+  focusGene = gene || 'LDLR';
+  const nameEl = document.getElementById('focus-gene-name');
+  const el = document.getElementById('focus-stats');
+  if (!el || !indexCache?.gene_breakdowns) return;
 
-  try {
-    const ldlr = JSON.parse(tracker.gene_stats('LDLR'));
-    el.innerHTML = `
-      <div class="row"><span>LDLR variants (all time)</span><span class="val">${formatNumber(ldlr.total)}</span></div>
-      <div class="row"><span class="badge-sm badge-path">Pathogenic / Likely</span><span class="val">${ldlr.pathogenic + ldlr.likely_pathogenic}</span></div>
-      <div class="row"><span class="badge-sm badge-vus">VUS</span><span class="val">${formatNumber(ldlr.vus)}</span></div>
-      <div class="row"><span class="badge-sm badge-benign">Benign / Likely</span><span class="val">${ldlr.benign + ldlr.likely_benign}</span></div>
-      <div class="row"><span class="badge-sm badge-confl">Conflicting</span><span class="val">${ldlr.conflicting}</span></div>
-    `;
-
-    // Update survival curve with full LDLR data
-    const curve = JSON.parse(tracker.vus_survival_curve('LDLR'));
-    if (curve.length > 2) {
-      document.getElementById('survival-chart').innerHTML = renderSurvivalSVG(curve);
-    }
-  } catch(e) {
-    el.innerHTML = '<div style="color:#94a3b8;font-size:11px">Loading LDLR data...</div>';
+  const g = indexCache.gene_breakdowns[focusGene];
+  if (!g) {
+    if (nameEl) nameEl.textContent = focusGene;
+    el.innerHTML = `<span style="color:#94a3b8">Not in top genes</span>`;
+    return;
   }
+
+  if (nameEl) nameEl.textContent = focusGene;
+
+  el.innerHTML = `
+    <span class="focus-item"><span class="badge-sm badge-path">Path</span> ${formatNumber(g.pathogenic + g.likely_pathogenic)}</span>
+    <span class="focus-item"><span class="badge-sm badge-vus">VUS</span> ${formatNumber(g.vus)}</span>
+    <span class="focus-item"><span class="badge-sm badge-benign">Ben</span> ${formatNumber(g.benign + g.likely_benign)}</span>
+    <span class="focus-item"><span class="badge-sm badge-confl">Confl</span> ${formatNumber(g.conflicting)}</span>
+    <span class="focus-item" style="color:#64748b">Total: ${formatNumber(g.total)}</span>
+  `;
 }
 
 // ── Search + Panel ───────────────────────────────────────────
@@ -245,6 +239,11 @@ function onSearch(e) {
   const results = JSON.parse(tracker.search_variant(q));
   renderResultRows(results, document.getElementById('reclass-list'));
   showTab(0);
+  // Update gene focus if searching for a known gene
+  const upper = q.toUpperCase();
+  if (indexCache?.gene_breakdowns?.[upper]) {
+    renderGeneFocus(upper);
+  }
 }
 
 function onPanelChange(e) {
@@ -392,12 +391,8 @@ window.showTab = function(n) {
 window.setRange = function(range) {
   document.querySelectorAll('.time-bar button').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
-  if (!tracker) return;
-  const stats = JSON.parse(tracker.set_time_range(range));
-  document.getElementById('total-variants').textContent = formatNumber(stats.total_variants || tracker.variant_count());
-  document.getElementById('delta').textContent = `${stats.new_vus_today || 0} new VUS today`;
-  renderStats(stats);
-  renderGenes(stats);
+  // Time range only affects the loaded subset view, not the real totals
+  // Hero numbers always show index.json totals
 };
 
 function formatNumber(n) {
