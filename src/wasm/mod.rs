@@ -637,6 +637,133 @@ impl VusTracker {
         serde_json::to_string(&result).unwrap_or_else(|_| "{}".into())
     }
 
+    /// Submitter concordance: for a gene, find variants where multiple submitters disagree.
+    /// Returns variants sorted by discordance (most disagreement first).
+    pub fn concordance_analysis(&self, gene: &str) -> String {
+        let upper = gene.to_uppercase();
+        let indices = match self.gene_index.get(&upper) {
+            Some(idxs) => idxs,
+            None => return "[]".into(),
+        };
+
+        let mut results: Vec<serde_json::Value> = Vec::new();
+
+        for &i in indices {
+            let v = &self.variants[i];
+
+            // Parse submitter count from "N submitters" format
+            let submitter_count: u32 = if v.submitter.contains("submitters") {
+                v.submitter.split_whitespace()
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(1)
+            } else if v.submitter.is_empty() {
+                1
+            } else {
+                1
+            };
+
+            let discordance_score: f64 = if matches!(v.classification, Classification::ConflictingInterpretations) {
+                1.0
+            } else if matches!(v.classification, Classification::Vus) && submitter_count > 1 {
+                0.5
+            } else {
+                0.0
+            };
+
+            results.push(serde_json::json!({
+                "variation_id": v.variation_id,
+                "gene": v.gene,
+                "hgvs": v.hgvs,
+                "classification": v.classification.short(),
+                "submitter": v.submitter,
+                "discordance_score": discordance_score,
+            }));
+        }
+
+        // Sort by discordance descending, then by submitter count descending
+        results.sort_by(|a, b| {
+            let da = a["discordance_score"].as_f64().unwrap_or(0.0);
+            let db = b["discordance_score"].as_f64().unwrap_or(0.0);
+            db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        serde_json::to_string(&results).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Classification drift: how has a gene's classification profile changed over time?
+    /// Returns monthly snapshots of the classification distribution.
+    pub fn classification_drift(&self, gene: &str) -> String {
+        let upper = gene.to_uppercase();
+        let indices = match self.gene_index.get(&upper) {
+            Some(idxs) => idxs,
+            None => return serde_json::json!({"gene": gene, "snapshots": []}).to_string(),
+        };
+
+        // Collect (month, classification) for each variant
+        let mut monthly_entries: Vec<(String, &str)> = Vec::new();
+        for &i in indices {
+            let v = &self.variants[i];
+            let month = if v.last_evaluated.len() >= 7 {
+                v.last_evaluated[..7].to_string()
+            } else {
+                continue;
+            };
+            monthly_entries.push((month, v.classification.short()));
+        }
+
+        // Sort by month
+        monthly_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Build cumulative snapshots per month
+        let mut cumulative_path: u32 = 0;
+        let mut cumulative_vus: u32 = 0;
+        let mut cumulative_ben: u32 = 0;
+        let mut current_month = String::new();
+        let mut snapshots: Vec<serde_json::Value> = Vec::new();
+
+        for (month, class) in &monthly_entries {
+            match *class {
+                "path." | "l.path." => cumulative_path += 1,
+                "VUS" => cumulative_vus += 1,
+                "benign" | "l.ben." => cumulative_ben += 1,
+                _ => {} // conflicting/other counted as VUS-adjacent
+            }
+
+            if month != &current_month {
+                if !current_month.is_empty() {
+                    // Emit snapshot for the previous month
+                    let total = cumulative_path + cumulative_vus + cumulative_ben;
+                    snapshots.push(serde_json::json!({
+                        "month": current_month,
+                        "path": cumulative_path,
+                        "vus": cumulative_vus,
+                        "ben": cumulative_ben,
+                        "total_cumulative": total,
+                    }));
+                }
+                current_month = month.clone();
+            }
+        }
+
+        // Emit final month
+        if !current_month.is_empty() {
+            let total = cumulative_path + cumulative_vus + cumulative_ben;
+            snapshots.push(serde_json::json!({
+                "month": current_month,
+                "path": cumulative_path,
+                "vus": cumulative_vus,
+                "ben": cumulative_ben,
+                "total_cumulative": total,
+            }));
+        }
+
+        serde_json::json!({
+            "gene": gene,
+            "snapshots": snapshots,
+        }).to_string()
+    }
+
     /// Search variants by condition/phenotype. Returns matching variants across all loaded genes.
     pub fn filter_by_condition(&self, query: &str) -> String {
         let q = query.to_lowercase();
