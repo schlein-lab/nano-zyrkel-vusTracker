@@ -1,0 +1,26 @@
+{
+  "id": "clinvar-tracker",
+  "description": "ClinVar VUS reclassification + submission tracker",
+  "type": "clinvar",
+  "source": {
+    "url": "https://eutils.ncbi.nlm.nih.gov",
+    "method": "GET"
+  },
+  "condition": {
+    "type": "contains",
+    "value": "."
+  },
+  "notify": {
+    "telegram": true
+  },
+  "output_dir": "staging",
+  "lang": "en",
+  "clinvar": {
+    "max_variants_per_run": 100,
+    "request_delay_ms": 350,
+    "notify_reclassifications": true,
+    "notify_new_pathogenic": true,
+    "generate_html": true,
+    "track_genes": []
+  }
+}
