@@ -1,0 +1,39 @@
+name: "ClinVar VUS Tracker"
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Run tracker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: ./target/release/vus-tracker --config hats/config.json --lang en --verbose
+
+      - name: Commit results
+        run: |
+          git config user.name "nano-zyrkel"
+          git config user.email "nano@zyrkel.local"
+          git add staging/
+          git diff --staged --quiet || \
+            git commit -m "clinvar $(date -u +%Y-%m-%d)"
+          git push || true
