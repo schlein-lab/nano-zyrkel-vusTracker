@@ -43,28 +43,45 @@ jobs:
           cp web/index.html web/app.js web/style.css web/sw.js pages/
           cp web/pkg/vus_tracker_lib_bg.wasm pages/pkg/
           cp web/pkg/vus_tracker_lib.js pages/pkg/
-          # Copy small data files for the browser
+          # Copy small data files
           cp staging/clinvar-tracker/index.json pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/reclassifications.jsonl pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/story.txt pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/daily_stats.jsonl pages/data/ 2>/dev/null || true
-          # Variants: compress with gzip for efficient transfer
-          # Full JSONL from LFS → gzip → Pages (browser decompresses natively)
+
+          # Filter out CNVs and multi-gene entries (contain semicolons or "subset of")
           if [ -f staging/clinvar-tracker/variants.jsonl ]; then
-            SIZE=$(wc -c < staging/clinvar-tracker/variants.jsonl)
-            echo "Raw variants: $SIZE bytes"
-            if [ "$SIZE" -gt 50000000 ]; then
-              # >50MB: take first 200k lines (~60MB raw, ~10MB gzip)
-              head -200000 staging/clinvar-tracker/variants.jsonl > pages/data/variants.jsonl
-            else
-              cp staging/clinvar-tracker/variants.jsonl pages/data/variants.jsonl
+            echo "Filtering CNVs and multi-gene entries..."
+            grep -v '"gene":"subset of' staging/clinvar-tracker/variants.jsonl \
+              | grep -v '"gene":"[^"]*;' \
+              > /tmp/variants_clean.jsonl
+            CLEAN=$(wc -l < /tmp/variants_clean.jsonl)
+            echo "Clean single-gene variants: $CLEAN"
+
+            # today.jsonl: variants from last 7 days (tiny, instant load)
+            TODAY=$(date -u +%Y-%m-%d)
+            WEEK_AGO=$(date -u -d '7 days ago' +%Y-%m-%d)
+            grep -E "\"last_evaluated\":\"($TODAY|$WEEK_AGO" /tmp/variants_clean.jsonl \
+              > pages/data/today.jsonl 2>/dev/null || true
+            # If that's too few, take last 500 lines as fallback
+            if [ $(wc -l < pages/data/today.jsonl) -lt 50 ]; then
+              tail -500 /tmp/variants_clean.jsonl > pages/data/today.jsonl
             fi
+            echo "Today file: $(wc -l < pages/data/today.jsonl) variants"
+
+            # Extract key genes as separate files (full data per gene)
+            for GENE in LDLR BRCA1 BRCA2 TP53 ATM TTN NF1 MLH1 MSH2 CFTR MYH7 PALB2 SCN5A FBN1 APC; do
+              grep "\"gene\":\"$GENE\"" /tmp/variants_clean.jsonl > "pages/data/gene_${GENE}.jsonl" 2>/dev/null || true
+              COUNT=$(wc -l < "pages/data/gene_${GENE}.jsonl" 2>/dev/null || echo 0)
+              echo "  $GENE: $COUNT variants"
+            done
+
+            # Main variants: 10k recent single-gene variants (background load)
+            tail -10000 /tmp/variants_clean.jsonl > pages/data/variants.jsonl
+            echo "Main load: $(wc -l < pages/data/variants.jsonl) variants"
           fi
-          # Extract key genes as separate files for fast loading
-          for GENE in LDLR BRCA1 BRCA2 TP53 ATM TTN NF1 MLH1 MSH2 CFTR MYH7; do
-            grep "\"gene\":\"$GENE\"" staging/clinvar-tracker/variants.jsonl > "pages/data/gene_${GENE}.jsonl" 2>/dev/null || true
-          done
-          echo "Pages data:" && du -sh pages/data/*
+
+          echo "Pages data sizes:" && du -sh pages/data/*
 
       - name: Deploy to gh-pages branch
         run: |

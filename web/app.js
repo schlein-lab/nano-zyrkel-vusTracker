@@ -10,31 +10,48 @@ async function init() {
     await wasm.default();
     tracker = new wasm.VusTracker();
 
-    document.getElementById('total-variants').textContent = 'Loading data...';
+    document.getElementById('total-variants').textContent = 'Loading...';
 
-    // Load variants
-    const varResp = await fetch(`${DATA_BASE}/data/variants.jsonl`);
-    if (!varResp.ok) throw new Error('variants.jsonl not found');
-    const varText = await varResp.text();
-    tracker.load_variants(varText);
-
-    // Load reclassifications
+    // Phase 1: Load index (tiny, instant) for hero numbers
+    let indexData = null;
     try {
-      const rResp = await fetch(`${DATA_BASE}/data/reclassifications.jsonl`);
-      if (rResp.ok) tracker.load_reclassifications(await rResp.text());
-    } catch(e) {}
-
-    // Load story
-    try {
-      const sResp = await fetch(`${DATA_BASE}/data/story.txt`);
-      if (sResp.ok) {
-        const txt = (await sResp.text()).trim();
-        if (txt) {
-          document.getElementById('story').style.display = 'block';
-          document.getElementById('story-text').textContent = txt;
-        }
+      const idxResp = await fetch(`${DATA_BASE}/data/index.json`);
+      if (idxResp.ok) {
+        indexData = await idxResp.json();
+        document.getElementById('total-variants').textContent = formatNumber(indexData.total_variants || 0);
+        document.getElementById('delta').textContent = `${formatNumber(indexData.total_reclassifications || 0)} classification changes`;
       }
     } catch(e) {}
+
+    // Phase 2: Load today's data first (tiny, instant render)
+    try {
+      const todayResp = await fetch(`${DATA_BASE}/data/today.jsonl`);
+      if (todayResp?.ok) {
+        tracker.load_variants(await todayResp.text());
+        renderAll(); // Instant first paint with today's data
+      }
+    } catch(e) {}
+
+    // Phase 3: Load rest in parallel (background, user already sees data)
+    const [varResp, reclResp, storyResp] = await Promise.all([
+      fetch(`${DATA_BASE}/data/variants.jsonl`).catch(() => null),
+      fetch(`${DATA_BASE}/data/reclassifications.jsonl`).catch(() => null),
+      fetch(`${DATA_BASE}/data/story.txt`).catch(() => null),
+    ]);
+
+    if (varResp?.ok) {
+      tracker.load_variants(await varResp.text()); // Deduplicates automatically
+    }
+    if (reclResp?.ok) {
+      tracker.load_reclassifications(await reclResp.text());
+    }
+    if (storyResp?.ok) {
+      const txt = (await storyResp.text()).trim();
+      if (txt) {
+        document.getElementById('story').style.display = 'block';
+        document.getElementById('story-text').textContent = txt;
+      }
+    }
 
     // Panels
     const panels = JSON.parse(tracker.predefined_panels());
@@ -46,7 +63,7 @@ async function init() {
       sel.appendChild(o);
     });
 
-    // Initial render — all tabs
+    // Initial render
     renderAll();
 
     // Events
@@ -79,8 +96,8 @@ function renderAll() {
   // Tab 0: Latest (recent reclassifications OR newest variants)
   renderLatest();
 
-  // Tab 1: New VUS
-  renderNewVUS();
+  // Tab 1: Classification Changes
+  renderChanges();
 
   // Tab 2: Genes
   renderGenes(stats);
@@ -94,34 +111,47 @@ function renderAll() {
 
 function renderLatest() {
   const el = document.getElementById('reclass-list');
-  const rCount = tracker.reclass_count();
 
-  if (rCount > 0) {
-    el.innerHTML = `<div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
-      ${formatNumber(rCount)} classification changes detected — a submitter filed a different
-      classification than previous submissions for the same variant.
-      <em>These are computational observations, not clinical reclassifications.</em>
-    </div>`;
+  // Show mix of recent variants across classifications
+  const categories = [
+    { key: 'path.', label: 'Pathogenic', limit: 5 },
+    { key: 'VUS', label: 'VUS', limit: 5 },
+    { key: 'l.path.', label: 'Likely Pathogenic', limit: 3 },
+    { key: 'l.ben.', label: 'Likely Benign', limit: 3 },
+    { key: 'confl.', label: 'Conflicting', limit: 4 },
+  ];
+
+  let html = '';
+  for (const cat of categories) {
+    const data = JSON.parse(tracker.filter_classification(cat.key));
+    const items = (data.sample || []).slice(0, cat.limit);
+    const total = data.total || 0;
+    if (items.length) {
+      html += `<div class="section-title" style="margin-top:8px">${cat.label} <span style="font-weight:400">(${formatNumber(total)} total)</span></div>`;
+      html += items.map((v, i) => renderRow(v, i)).join('');
+    }
   }
-  // Show recent pathogenic submissions as clickable rows
-  const pathogenic = JSON.parse(tracker.filter_classification('path.'));
-  const items = (pathogenic.sample || []).slice(0, 20);
-  if (items.length) {
-    el.innerHTML += '<div class="section-title">Recent pathogenic submissions</div>';
-    el.innerHTML += items.map((v, i) => renderRow(v, i)).join('');
-  }
+  el.innerHTML = html || '<div style="color:#94a3b8">Loading variants...</div>';
 }
 
-function renderNewVUS() {
+function renderChanges() {
   const el = document.getElementById('vus-list');
-  const vus = JSON.parse(tracker.filter_classification('VUS'));
-  const total = vus.total || 0;
-  const items = vus.sample || [];
-  if (total > 0) {
-    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:6px">${formatNumber(total)} VUS total · showing ${items.length}</div>` +
-      items.slice(0, 20).map((v, i) => renderRow(v, i)).join('');
+  const rCount = tracker.reclass_count();
+  if (rCount > 0) {
+    el.innerHTML = `<div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
+      ${formatNumber(rCount)} classification changes detected across all loaded data.<br>
+      A "change" means the same submitter filed a different classification for a variant over time.
+      <em>These are computational observations, not clinical reclassifications.</em>
+    </div>`;
+    // Show breakdown
+    const stats = JSON.parse(tracker.compute_stats());
+    el.innerHTML += `
+      <div class="section-title">Breakdown</div>
+      <div class="row"><span>Total changes</span><span class="val">${formatNumber(rCount)}</span></div>
+      <div class="row"><span>VUS → path. shifts (30d)</span><span class="val">${stats.vus_to_path_30d || 0}</span></div>
+    `;
   } else {
-    el.innerHTML = '<div class="row" style="color:#94a3b8">No VUS in loaded data.</div>';
+    el.innerHTML = '<div style="color:#94a3b8;font-size:11px">No classification changes in loaded data.</div>';
   }
 }
 
