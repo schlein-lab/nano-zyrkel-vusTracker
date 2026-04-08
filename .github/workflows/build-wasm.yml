@@ -1,0 +1,63 @@
+name: Build WASM + Deploy Pages
+
+on:
+  push:
+    paths: ['src/**', 'web/**', 'Cargo.toml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Rust + WASM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            target/
+          key: ${{ runner.os }}-wasm-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack || true
+
+      - name: Build WASM
+        run: wasm-pack build --target web --out-dir web/pkg --features wasm --no-default-features
+
+      - name: Prepare GitHub Pages
+        run: |
+          mkdir -p pages/pkg pages/data
+          cp web/index.html web/app.js web/style.css pages/
+          cp web/pkg/vus_tracker_lib_bg.wasm pages/pkg/
+          cp web/pkg/vus_tracker_lib.js pages/pkg/
+          # Copy small data files for the browser
+          cp staging/clinvar-tracker/index.json pages/data/ 2>/dev/null || true
+          cp staging/clinvar-tracker/reclassifications.jsonl pages/data/ 2>/dev/null || true
+          cp staging/clinvar-tracker/story.txt pages/data/ 2>/dev/null || true
+          cp staging/clinvar-tracker/daily_stats.jsonl pages/data/ 2>/dev/null || true
+          # For variants: take only last 7 days (small enough for Pages)
+          tail -5000 staging/clinvar-tracker/variants.jsonl > pages/data/variants.jsonl 2>/dev/null || true
+          echo "Pages data size: $(du -sh pages/data/)"
+
+      - name: Deploy to gh-pages branch
+        run: |
+          cd pages
+          git init
+          git config user.name "nano-zyrkel"
+          git config user.email "nano@zyrkel.local"
+          git add -A
+          git commit -m "deploy $(date -u +%Y-%m-%dT%H:%M)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" master:gh-pages
