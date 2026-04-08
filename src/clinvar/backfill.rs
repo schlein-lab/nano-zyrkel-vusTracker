@@ -62,6 +62,11 @@ pub fn run_backfill(path: &str, output_dir: &str) -> Result<()> {
     std::fs::write(&index_path, serde_json::to_string_pretty(&index)?)?;
     tracing::info!("[backfill] Wrote index to {}", index_path);
 
+    // RSS feed of classification changes
+    let rss_path = format!("{}/feed.xml", output_dir);
+    generate_rss(&rss_path, &reclassifications)?;
+    tracing::info!("[backfill] Wrote RSS feed to {}", rss_path);
+
     // Summary stats
     let vus_count = deduped.iter().filter(|v| matches!(v.classification, Classification::Vus)).count();
     let path_count = deduped.iter().filter(|v| matches!(v.classification, Classification::Pathogenic | Classification::LikelyPathogenic)).count();
@@ -116,20 +121,34 @@ fn parse_variant_summary(path: &str) -> Result<Vec<ClinVarVariant>> {
         let variation_id = get_field(&fields, &header_cols, "VariationID");
         let condition = get_field(&fields, &header_cols, "PhenotypeList");
         let assembly = get_field(&fields, &header_cols, "Assembly");
+        let chrom = get_field(&fields, &header_cols, "Chromosome");
+        let start = get_field(&fields, &header_cols, "Start");
+        let ref_vcf = get_field(&fields, &header_cols, "ReferenceAlleleVCF");
+        let alt_vcf = get_field(&fields, &header_cols, "AlternateAlleleVCF");
+        let phenotype_ids_raw = get_field(&fields, &header_cols, "PhenotypeIDS");
 
         // Skip if essential fields missing
         if gene.is_empty() || gene == "-" || gene == "." { continue; }
         if significance.is_empty() || significance == "-" { continue; }
         if variation_id.is_empty() { continue; }
 
-        // Prefer GRCh38 rows, but accept GRCh37 if no GRCh38 available
-        // (deduplicate later keeps the latest)
-        let _ = assembly; // We keep both, dedup handles it
+        // Prefer GRCh38 rows — skip GRCh37 if we'll get GRCh38 later (dedup handles it)
+        let _ = assembly;
 
         let eval_date = normalize_date(last_eval);
 
         // Skip multi-gene CNVs (e.g. "subset of 121 genes: MBD5")
         if gene.contains("subset of") || gene.contains(';') { continue; }
+
+        // Parse genomic position
+        let pos: u64 = start.parse().unwrap_or(0);
+
+        // Clean phenotype IDs (keep OMIM, MedGen, MONDO, Orphanet references)
+        let phenotype_ids = if phenotype_ids_raw == "-" || phenotype_ids_raw.is_empty() {
+            String::new()
+        } else {
+            phenotype_ids_raw.to_string()
+        };
 
         variants.push(ClinVarVariant {
             variation_id: variation_id.to_string(),
@@ -141,6 +160,11 @@ fn parse_variant_summary(path: &str) -> Result<Vec<ClinVarVariant>> {
             last_evaluated: eval_date.clone(),
             condition: condition.to_string(),
             first_seen: eval_date,
+            chrom: chrom.to_string(),
+            pos,
+            ref_allele: ref_vcf.to_string(),
+            alt_allele: alt_vcf.to_string(),
+            phenotype_ids,
         });
 
         if line_num % 500_000 == 0 && line_num > 0 {
@@ -213,11 +237,15 @@ fn detect_historical_reclassifications(variants: &[ClinVarVariant]) -> Vec<Recla
 }
 
 /// Build a compact index for the frontend.
+/// Contains everything the browser needs without loading variant data.
 fn build_index(variants: &[ClinVarVariant], reclassifications: &[ReclassificationEvent]) -> serde_json::Value {
     let mut gene_counts: HashMap<String, u32> = HashMap::new();
     let mut class_counts: HashMap<String, u32> = HashMap::new();
     let mut date_min = String::from("9999");
     let mut date_max = String::from("0000");
+
+    // Per-gene classification breakdown: gene → {path, lpath, vus, lben, ben, confl}
+    let mut gene_class: HashMap<String, [u32; 7]> = HashMap::new();
 
     for v in variants {
         *gene_counts.entry(v.gene.clone()).or_default() += 1;
@@ -226,6 +254,17 @@ fn build_index(variants: &[ClinVarVariant], reclassifications: &[Reclassificatio
             if v.last_evaluated < date_min { date_min = v.last_evaluated.clone(); }
             if v.last_evaluated > date_max { date_max = v.last_evaluated.clone(); }
         }
+
+        let gc = gene_class.entry(v.gene.clone()).or_default();
+        match v.classification {
+            Classification::Pathogenic => gc[0] += 1,
+            Classification::LikelyPathogenic => gc[1] += 1,
+            Classification::Vus => gc[2] += 1,
+            Classification::LikelyBenign => gc[3] += 1,
+            Classification::Benign => gc[4] += 1,
+            Classification::ConflictingInterpretations => gc[5] += 1,
+            Classification::Other(_) => gc[6] += 1,
+        }
     }
 
     // Top 50 genes
@@ -233,12 +272,33 @@ fn build_index(variants: &[ClinVarVariant], reclassifications: &[Reclassificatio
     top_genes.sort_by(|a, b| b.1.cmp(&a.1));
     top_genes.truncate(50);
 
+    // Gene breakdowns for top 50 + key clinical genes
+    let focus_genes: Vec<String> = {
+        let mut g: Vec<String> = top_genes.iter().map(|(n, _)| n.clone()).collect();
+        for extra in ["LDLR", "BRCA1", "BRCA2", "TP53", "MLH1", "MSH2", "CFTR", "MYH7", "SCN5A", "PALB2"] {
+            if !g.contains(&extra.to_string()) { g.push(extra.to_string()); }
+        }
+        g
+    };
+
+    let gene_breakdowns: HashMap<String, serde_json::Value> = focus_genes.iter()
+        .filter_map(|g| {
+            gene_class.get(g).map(|c| (g.clone(), serde_json::json!({
+                "total": c.iter().sum::<u32>(),
+                "pathogenic": c[0], "likely_pathogenic": c[1],
+                "vus": c[2], "likely_benign": c[3], "benign": c[4],
+                "conflicting": c[5], "other": c[6],
+            })))
+        })
+        .collect();
+
     serde_json::json!({
         "total_variants": variants.len(),
         "total_reclassifications": reclassifications.len(),
         "date_range": { "from": date_min, "to": date_max },
         "classifications": class_counts,
         "top_genes": top_genes,
+        "gene_breakdowns": gene_breakdowns,
         "generated_at": chrono::Utc::now().to_rfc3339(),
     })
 }
@@ -361,4 +421,45 @@ fn normalize_date(raw: &str) -> String {
 
     // Fallback: return as-is (will still work, just may not sort perfectly)
     raw.to_string()
+}
+
+/// Generate RSS feed of recent classification changes.
+fn generate_rss(path: &str, events: &[ReclassificationEvent]) -> Result<()> {
+    use std::io::Write;
+    let file = std::fs::File::create(path)?;
+    let mut w = std::io::BufWriter::new(file);
+
+    writeln!(w, r#"<?xml version="1.0" encoding="UTF-8"?>"#)?;
+    writeln!(w, r#"<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">"#)?;
+    writeln!(w, "<channel>")?;
+    writeln!(w, "<title>nano-zyrkel-vusTracker — Classification Changes</title>")?;
+    writeln!(w, "<link>https://schlein-lab.github.io/nano-zyrkel-vusTracker/</link>")?;
+    writeln!(w, "<description>ClinVar variant classification changes detected by nano-zyrkel</description>")?;
+    writeln!(w, "<language>en</language>")?;
+    writeln!(w, "<lastBuildDate>{}</lastBuildDate>", chrono::Utc::now().to_rfc2822())?;
+
+    // Latest 50 events (sorted by date, newest first)
+    let mut sorted: Vec<&ReclassificationEvent> = events.iter().collect();
+    sorted.sort_by(|a, b| b.detected_at.cmp(&a.detected_at));
+
+    for e in sorted.iter().take(50) {
+        let title = format!("{} {} → {}", e.gene, e.old.short(), e.new.short());
+        let desc = format!("{} in gene {} changed from {} to {} ({})",
+            e.hgvs, e.gene, e.old, e.new, e.submitter);
+        let link = format!("https://www.ncbi.nlm.nih.gov/clinvar/variation/{}/", e.variation_id);
+        writeln!(w, "<item>")?;
+        writeln!(w, "  <title>{}</title>", xml_esc(&title))?;
+        writeln!(w, "  <description>{}</description>", xml_esc(&desc))?;
+        writeln!(w, "  <link>{}</link>", link)?;
+        writeln!(w, "  <guid>{}</guid>", link)?;
+        writeln!(w, "  <pubDate>{}</pubDate>", e.detected_at)?;
+        writeln!(w, "</item>")?;
+    }
+
+    writeln!(w, "</channel></rss>")?;
+    Ok(())
+}
+
+fn xml_esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }

@@ -97,6 +97,18 @@ pub struct ClinVarVariant {
     pub last_evaluated: String,
     pub condition: String,
     pub first_seen: String,
+    // Genomic coordinates (GRCh38)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub chrom: String,
+    #[serde(default)]
+    pub pos: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ref_allele: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub alt_allele: String,
+    // Phenotype IDs (OMIM, MedGen, MONDO, Orphanet)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub phenotype_ids: String,
 }
 
 /// A detected reclassification event.
