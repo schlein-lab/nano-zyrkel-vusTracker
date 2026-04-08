@@ -397,8 +397,7 @@ window.setRange = function(range) {
 
 function formatNumber(n) {
   if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return Math.floor(n/1e3).toLocaleString('en-US');
-  return String(n);
+  return Number(n).toLocaleString('en-US');
 }
 
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }

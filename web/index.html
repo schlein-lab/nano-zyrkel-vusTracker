@@ -39,26 +39,31 @@
   <div class="detail-section" id="detail-section">
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab active" onclick="showTab(0)">Genes</button>
-      <button class="tab" onclick="showTab(1)">Changes</button>
-      <button class="tab" onclick="showTab(2)">Stats</button>
-      <button class="tab" onclick="showTab(3)">VCF</button>
+      <button class="tab active" onclick="showTab(0)">Latest</button>
+      <button class="tab" onclick="showTab(1)">Genes</button>
+      <button class="tab" onclick="showTab(2)">Changes</button>
+      <button class="tab" onclick="showTab(3)">Stats</button>
+      <button class="tab" onclick="showTab(4)">VCF</button>
     </div>
 
     <div class="tab-content active" id="tab0">
-      <div id="gene-list" class="list"></div>
+      <div id="reclass-list" class="list"></div>
     </div>
 
     <div class="tab-content" id="tab1">
-      <div id="vus-list" class="list"></div>
+      <div id="gene-list" class="list"></div>
     </div>
 
     <div class="tab-content" id="tab2">
+      <div id="vus-list" class="list"></div>
+    </div>
+
+    <div class="tab-content" id="tab3">
       <div id="stats-list" class="list"></div>
       <div id="survival-chart"></div>
     </div>
 
-    <div class="tab-content" id="tab3">
+    <div class="tab-content" id="tab4">
       <div class="vcf-drop" id="vcf-drop">
         <div class="vcf-icon">VCF</div>
         <div>Drop VCF here or <label for="vcf-input" class="vcf-link">browse</label></div>
