@@ -72,12 +72,15 @@ async function init() {
     document.getElementById('report-date').addEventListener('change', onReportDate);
     setupVCFDrop();
 
-    // URL parameter: ?gene=XXX → focus that gene
+    // URL parameter: ?gene=XXX → load gene data + focus
     const urlGene = new URLSearchParams(window.location.search).get('gene');
     if (urlGene) {
       const g = urlGene.toUpperCase();
-      renderGeneFocus(g);
       document.getElementById('search').value = g;
+      await loadGeneData(g);
+      renderGeneFocus(g);
+      // Trigger full search view
+      document.getElementById('search').dispatchEvent(new Event('input'));
     }
 
     console.log(`vusTracker: ${tracker.variant_count()} variants, ${tracker.reclass_count()} classification changes`);
@@ -220,40 +223,104 @@ function renderGeneFocus(gene) {
   focusGene = gene || 'LDLR';
   const nameEl = document.getElementById('focus-gene-name');
   const el = document.getElementById('focus-stats');
-  if (!el || !indexCache?.gene_breakdowns) return;
+  if (!el) return;
+  if (nameEl) nameEl.textContent = focusGene;
 
-  const g = indexCache.gene_breakdowns[focusGene];
+  // Try WASM live compute first (if gene data loaded)
+  let g = null;
+  let source = 'index';
+  if (tracker && loadedGenes.has(focusGene)) {
+    g = JSON.parse(tracker.gene_stats(focusGene));
+    source = 'wasm';
+  }
+  // Fallback to index.json
+  if (!g || g.total === 0) {
+    g = indexCache?.gene_breakdowns?.[focusGene];
+    source = 'index';
+  }
+
   if (!g) {
-    if (nameEl) nameEl.textContent = focusGene;
-    el.innerHTML = `<span style="color:#94a3b8">Not in top genes</span>`;
+    el.innerHTML = `<span style="color:#94a3b8">Not in top genes. Type a gene name to load its data.</span>`;
     return;
   }
 
-  if (nameEl) nameEl.textContent = focusGene;
+  const p = (g.pathogenic||0) + (g.likely_pathogenic||0);
+  const b = (g.benign||0) + (g.likely_benign||0);
+  const badge = source === 'wasm' ? '<span style="color:#0f766e;font-size:7px;margin-left:4px;">LIVE</span>' : '';
 
   el.innerHTML = `
-    <span class="focus-item"><span class="badge-sm badge-path">Path</span> ${formatNumber(g.pathogenic + g.likely_pathogenic)}</span>
+    <span class="focus-item"><span class="badge-sm badge-path">Path</span> ${formatNumber(p)}</span>
     <span class="focus-item"><span class="badge-sm badge-vus">VUS</span> ${formatNumber(g.vus)}</span>
-    <span class="focus-item"><span class="badge-sm badge-benign">Ben</span> ${formatNumber(g.benign + g.likely_benign)}</span>
+    <span class="focus-item"><span class="badge-sm badge-benign">Ben</span> ${formatNumber(b)}</span>
     <span class="focus-item"><span class="badge-sm badge-confl">Confl</span> ${formatNumber(g.conflicting)}</span>
-    <span class="focus-item" style="color:#64748b">Total: ${formatNumber(g.total)}</span>
+    <span class="focus-item" style="color:#64748b">Total: ${formatNumber(g.total)}${badge}</span>
   `;
 }
 
 // ── Search + Panel ───────────────────────────────────────────
 
-function onSearch(e) {
+let loadedGenes = new Set(); // track which gene files we've loaded
+
+async function loadGeneData(gene) {
+  if (loadedGenes.has(gene)) return;
+  try {
+    const resp = await fetch(`${DATA_BASE}/data/gene_${gene}.jsonl`);
+    if (resp.ok) {
+      tracker.load_variants(await resp.text());
+      loadedGenes.add(gene);
+      console.log(`Loaded ${gene} variants into WASM`);
+    }
+  } catch(e) {}
+}
+
+async function onSearch(e) {
   const q = e.target.value.trim();
   if (q.length < 2) { renderAll(); return; }
-  const results = JSON.parse(tracker.search_variant(q));
-  renderResultRows(results, document.getElementById('reclass-list'));
-  showTab(0);
-  // Update gene focus if searching for a known gene
+
+  const el = document.getElementById('reclass-list');
   const upper = q.toUpperCase();
-  if (indexCache?.gene_breakdowns?.[upper]) {
+
+  // Is it a gene name?
+  const isGene = indexCache?.gene_breakdowns?.[upper];
+
+  if (isGene) {
+    // Load full gene data into WASM for live computation
+    el.innerHTML = '<div style="color:#0f766e;font-size:10px;">Loading gene data...</div>';
+    await loadGeneData(upper);
     renderGeneFocus(upper);
     history.replaceState(null, '', '?gene=' + encodeURIComponent(upper));
+
+    // WASM live compute: gene_stats from loaded data
+    const live = JSON.parse(tracker.gene_stats(upper));
+    const liveTotal = live.total || 0;
+
+    // Show WASM-computed stats (LIVE, not from index.json)
+    el.innerHTML = `<div style="color:#0f766e;font-size:10px;margin-bottom:4px;">
+      <strong>${formatNumber(liveTotal)} ${upper} variants loaded</strong> — computed live via WASM
+    </div>`;
+
+    // Show variant list from WASM search
+    const geneResults = JSON.parse(tracker.search_gene(upper));
+    const variants = geneResults.sample || [];
+    el.innerHTML += `<div class="section-title" style="margin-top:4px">Variants (${formatNumber(geneResults.total)} total, showing ${variants.length})</div>`;
+    el.innerHTML += variants.map((v, i) => renderRow(v, i)).join('');
+  } else {
+    // Variant/HGVS search: c.1234, p.Arg, NM_000527, etc.
+    el.innerHTML = '<div style="color:#0f766e;font-size:10px;">Searching variants...</div>';
+    const results = JSON.parse(tracker.search_variant(q));
+    if (results.length) {
+      el.innerHTML = `<div style="color:#0f766e;font-size:10px;margin-bottom:4px;">
+        ${results.length} variants matching "${esc(q)}" — filtered live via WASM
+      </div>`;
+      el.innerHTML += results.map((v, i) => renderRow(v, i)).join('');
+    } else {
+      el.innerHTML = `<div style="color:#94a3b8;font-size:10px;">
+        No variants matching "${esc(q)}" in loaded data.<br>
+        Try searching a gene name first (e.g., LDLR) to load its variants.
+      </div>`;
+    }
   }
+  showTab(0);
 }
 
 function onReportDate(e) {

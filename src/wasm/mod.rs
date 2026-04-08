@@ -98,13 +98,13 @@ impl VusTracker {
         }).to_string()
     }
 
-    /// Search by gene name. Returns JSON with total count + paginated sample.
+    /// Search by gene name. Returns JSON with total count + sample (up to 200).
     pub fn search_gene(&self, gene: &str) -> String {
         let upper = gene.to_uppercase();
         let indices = self.gene_index.get(&upper);
         match indices {
             Some(idxs) => {
-                let sample: Vec<&ClinVarVariant> = idxs.iter().take(50).map(|&i| &self.variants[i]).collect();
+                let sample: Vec<&ClinVarVariant> = idxs.iter().take(200).map(|&i| &self.variants[i]).collect();
                 serde_json::json!({
                     "total": idxs.len(),
                     "sample": sample,
@@ -154,12 +154,18 @@ impl VusTracker {
         }).to_string()
     }
 
-    /// Search by HGVS or variant name (substring match). Returns JSON array.
+    /// Search by HGVS, gene, variant name, or any substring. Returns JSON array.
+    /// Searches: c.1234, p.Arg123, NM_000527, gene names, conditions.
     pub fn search_variant(&self, query: &str) -> String {
         let q = query.to_lowercase();
         let results: Vec<&ClinVarVariant> = self.variants.iter()
-            .filter(|v| v.hgvs.to_lowercase().contains(&q) || v.gene.to_lowercase().contains(&q))
-            .take(50)
+            .filter(|v| {
+                v.hgvs.to_lowercase().contains(&q)
+                || v.gene.to_lowercase().contains(&q)
+                || v.condition.to_lowercase().contains(&q)
+                || v.variation_id.contains(&q)
+            })
+            .take(100)
             .collect();
         serde_json::to_string(&results).unwrap_or_else(|_| "[]".into())
     }
