@@ -1,3 +1,11 @@
 /target
 .env
+.env.*
 data/
+*.pem
+*.key
+auth.json
+credentials.json
+.codex/
+node_modules/
+secrets/
