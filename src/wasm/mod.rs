@@ -37,13 +37,27 @@ impl VusTracker {
         }
     }
 
-    /// Load variants from JSONL string. Call once after fetching data.
-    /// Builds all indices for fast subsequent queries.
+    /// Load variants from JSONL string. Can be called multiple times
+    /// to append data (e.g., load gene-specific files on demand).
+    /// Deduplicates by variation_id and rebuilds all indices.
     pub fn load_variants(&mut self, jsonl: &str) {
-        self.variants = jsonl.lines()
+        let new: Vec<ClinVarVariant> = jsonl.lines()
             .filter(|l| !l.trim().is_empty())
             .filter_map(|l| serde_json::from_str(l).ok())
             .collect();
+
+        // Deduplicate: keep existing, add only new variation_ids
+        let existing_ids: std::collections::HashSet<String> = self.variants.iter()
+            .map(|v| v.variation_id.clone())
+            .collect();
+        let mut added = 0;
+        for v in new {
+            if !existing_ids.contains(&v.variation_id) {
+                self.variants.push(v);
+                added += 1;
+            }
+        }
+
         self.build_indices();
     }
 
@@ -86,14 +100,19 @@ impl VusTracker {
         serde_json::to_string(&results).unwrap_or_else(|_| "[]".into())
     }
 
-    /// Filter by classification. Returns JSON array.
+    /// Filter by classification. Returns JSON object with total count + sample.
     pub fn filter_classification(&self, class: &str) -> String {
         let indices = self.class_index.get(class);
-        let results: Vec<&ClinVarVariant> = match indices {
-            Some(idxs) => idxs.iter().take(100).map(|&i| &self.variants[i]).collect(),
-            None => Vec::new(),
-        };
-        serde_json::to_string(&results).unwrap_or_else(|_| "[]".into())
+        match indices {
+            Some(idxs) => {
+                let sample: Vec<&ClinVarVariant> = idxs.iter().take(50).map(|&i| &self.variants[i]).collect();
+                serde_json::json!({
+                    "total": idxs.len(),
+                    "sample": sample,
+                }).to_string()
+            }
+            None => serde_json::json!({"total": 0, "sample": []}).to_string(),
+        }
     }
 
     /// Compute all aggregate stats. Returns JSON.

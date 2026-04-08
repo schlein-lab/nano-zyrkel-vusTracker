@@ -94,25 +94,35 @@ function renderAll() {
 
 function renderLatest() {
   const el = document.getElementById('reclass-list');
+  const rCount = tracker.reclass_count();
 
-  // Try reclassifications first
-  if (tracker.reclass_count() > 0) {
-    // Search for any gene to get reclassified variants — use stats
-    el.innerHTML = '<div class="row" style="color:#64748b">See reclassifications in Stats tab.</div>';
-  }
-
-  // Show newest variants (any classification)
-  const newest = JSON.parse(tracker.search_variant('.'));
-  if (newest.length > 0) {
-    el.innerHTML = newest.slice(0, 15).map(v => `
-      <div class="row">
-        <span class="gene">${esc(v.gene)}</span>
-        <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
-        <span class="badge-sm ${badgeClass(v.classification)}">${shortClass(v.classification)}</span>
-      </div>
-    `).join('');
+  if (rCount > 0) {
+    // Show actual reclassifications with old → new
+    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:4px">${rCount} reclassifications detected</div>`;
+    // TODO: expose reclassification list from WASM with old/new classification
+    el.innerHTML += '<div style="color:#94a3b8;font-size:11px">Details in Stats tab.</div>';
   } else {
-    el.innerHTML = '<div class="row" style="color:#94a3b8">No data loaded.</div>';
+    // No reclassifications yet — show newest submissions instead
+    el.innerHTML = `
+      <div style="color:#64748b;font-size:11px;margin-bottom:8px;line-height:1.4;">
+        No reclassifications detected yet.<br>
+        The tracker observes ClinVar daily and detects when a variant's classification changes over time.
+        This requires multiple data snapshots — check back in a few days.
+      </div>
+      <div class="section-title">Newest submissions</div>
+    `;
+    // Show some recent pathogenic variants as highlights
+    const pathogenic = JSON.parse(tracker.filter_classification('path.'));
+    const items = (pathogenic.sample || pathogenic).slice?.(0, 10) || [];
+    if (items.length) {
+      el.innerHTML += items.map(v => `
+        <div class="row">
+          <span class="gene">${esc(v.gene)}</span>
+          <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
+          <span class="badge-sm badge-path">path.</span>
+        </div>
+      `).join('');
+    }
   }
 }
 
@@ -246,13 +256,25 @@ function renderResults(variants, container) {
     container.innerHTML = '<div class="row" style="color:#94a3b8">No results.</div>';
     return;
   }
-  container.innerHTML = variants.slice(0, 30).map(v => `
-    <div class="row">
-      <span class="gene">${esc(v.gene)}</span>
-      <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
-      <span class="badge-sm ${badgeClass(v.classification)}">${shortClass(v.classification)}</span>
+  container.innerHTML = variants.slice(0, 20).map(v => renderCard(v)).join('');
+}
+
+function renderCard(v) {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <span class="card-gene">${esc(v.gene)}</span>
+        <span class="badge-sm ${badgeClass(v.classification)}">${shortClass(v.classification)}</span>
+      </div>
+      <div class="card-hgvs">${esc(v.hgvs || '')}</div>
+      <div class="card-meta">
+        <span><span class="label">Condition:</span> ${esc((v.condition||'not provided').substring(0,40))}</span>
+        <span><span class="label">Submitter:</span> ${esc((v.submitter||'unknown').substring(0,30))}</span>
+        <span><span class="label">Evaluated:</span> ${esc(v.last_evaluated||'—')}</span>
+        <span><span class="label">Review:</span> ${esc((v.review_status||'').substring(0,25))}</span>
+      </div>
     </div>
-  `).join('');
+  `;
 }
 
 // ── VCF Upload ───────────────────────────────────────────────
