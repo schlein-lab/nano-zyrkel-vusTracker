@@ -16,30 +16,21 @@
       <span class="badge live">live</span>
     </div>
     <div class="header-right">
-      <input type="text" id="search" placeholder="Gene..." autocomplete="off">
-      <input type="date" id="report-date" title="Report date — what changed since?">
+      <div class="search-wrap">
+        <input type="text" id="search" placeholder="Search gene/variant..." autocomplete="off">
+        <div class="autocomplete" id="autocomplete"></div>
+      </div>
+      <input type="date" id="report-date" title="Report date -- what changed since?">
     </div>
   </div>
 
-  <!-- Hero: Big Number + Gene Focus -->
+  <!-- Hero -->
   <div class="hero">
-    <div class="big-number" id="total-variants">—</div>
+    <div class="big-number" id="total-variants">---</div>
     <div class="subtitle">
       <span id="delta">loading...</span> ·
       <span id="trend"></span>
     </div>
-  </div>
-
-  <!-- Story of the Day (LLM-generated, hidden if empty) -->
-  <div class="story" id="story" style="display:none;">
-    <div class="story-label">Story of the Day</div>
-    <div class="story-text" id="story-text"></div>
-  </div>
-
-  <!-- Gene Focus (default: LDLR) — always visible, changes on search -->
-  <div class="gene-focus" id="gene-focus">
-    <div class="focus-gene-name" id="focus-gene-name">LDLR</div>
-    <div id="focus-stats" class="focus-row"></div>
   </div>
 
   <!-- Time Range -->
@@ -51,35 +42,65 @@
     <button class="tb" onclick="setRange('all')">All</button>
   </div>
 
-  <!-- Expandable detail section (hidden by default in embed mode) -->
+  <!-- Gene Focus -->
+  <div class="gene-focus" id="gene-focus">
+    <div class="focus-header">
+      <span class="focus-gene-name" id="focus-gene-name">LDLR</span>
+      <span class="focus-source" id="focus-source"></span>
+    </div>
+    <div id="focus-stats" class="focus-row"></div>
+    <div id="focus-donut" class="focus-donut"></div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-bar" id="filter-bar">
+    <div class="filter-chips" id="filter-chips">
+      <button class="filter-chip active" data-class="0" onclick="toggleClass(0)">Path</button>
+      <button class="filter-chip active" data-class="1" onclick="toggleClass(1)">LP</button>
+      <button class="filter-chip active" data-class="2" onclick="toggleClass(2)">VUS</button>
+      <button class="filter-chip active" data-class="3" onclick="toggleClass(3)">LB</button>
+      <button class="filter-chip active" data-class="4" onclick="toggleClass(4)">Ben</button>
+      <button class="filter-chip active" data-class="5" onclick="toggleClass(5)">Confl</button>
+    </div>
+    <div class="sort-controls">
+      <button class="sort-btn" onclick="setSort('date')">Date</button>
+      <button class="sort-btn" onclick="setSort('classification')">Class</button>
+      <button class="sort-btn" onclick="setSort('hgvs')">HGVS</button>
+      <button class="sort-btn" onclick="setSort('gene')">Gene</button>
+    </div>
+  </div>
+
+  <!-- Loading indicator -->
+  <div class="loading" id="loading" style="display:none;">
+    <span class="loading-text" id="loading-text">loading...</span>
+  </div>
+
+  <!-- Expandable detail section -->
   <div class="detail-section" id="detail-section">
+    <!-- Variant list (scrollable, shown when gene loaded) -->
+    <div class="variant-list" id="variant-list"></div>
+
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab active" onclick="showTab(0)">Latest</button>
-      <button class="tab" onclick="showTab(1)">Genes</button>
-      <button class="tab" onclick="showTab(2)">Changes</button>
-      <button class="tab" onclick="showTab(3)">Stats</button>
-      <button class="tab" onclick="showTab(4)">VCF</button>
+      <button class="tab active" onclick="showTab(0)">Genes</button>
+      <button class="tab" onclick="showTab(1)">Changes</button>
+      <button class="tab" onclick="showTab(2)">Stats</button>
+      <button class="tab" onclick="showTab(3)">VCF</button>
     </div>
 
     <div class="tab-content active" id="tab0">
-      <div id="reclass-list" class="list"></div>
-    </div>
-
-    <div class="tab-content" id="tab1">
       <div id="gene-list" class="list"></div>
     </div>
 
+    <div class="tab-content" id="tab1">
+      <div id="changes-list" class="list"></div>
+    </div>
+
     <div class="tab-content" id="tab2">
-      <div id="vus-list" class="list"></div>
+      <div id="stats-list" class="list"></div>
     </div>
 
     <div class="tab-content" id="tab3">
-      <div id="stats-list" class="list"></div>
-      <div id="survival-chart"></div>
-    </div>
-
-    <div class="tab-content" id="tab4">
       <div class="vcf-drop" id="vcf-drop">
         <div class="vcf-icon">VCF</div>
         <div>Drop VCF here or <label for="vcf-input" class="vcf-link">browse</label></div>
@@ -87,21 +108,10 @@
       </div>
       <div id="vcf-results" class="list" style="display:none;"></div>
     </div>
-
-    <select id="panel-select" style="display:none;">
-      <option value="">Custom panel...</option>
-    </select>
-  </div>
-
-  <!-- Disclaimer -->
-  <div class="disclaimer">
-    Research use only. Classification changes are uncurated computational observations.
-    Data: <a href="https://www.ncbi.nlm.nih.gov/clinvar/" style="color:#94a3b8">NCBI ClinVar</a>.
   </div>
 
   <!-- Footer -->
   <div class="footer">
-    <span>nano-zyrkel · <a href="https://zyrkel.com">zyrkel.com</a></span>
     <div class="footer-actions">
       <select id="export-what" class="export-select">
         <option value="focus">Current gene</option>
@@ -114,7 +124,10 @@
       <button class="export-btn" onclick="doExport('xls')">Excel</button>
       <button class="export-btn" onclick="shareLink()">Share</button>
     </div>
-    <span class="privacy">Genomic data never leaves your browser.</span>
+    <div class="disclaimer">
+      Research use only. Data: <a href="https://www.ncbi.nlm.nih.gov/clinvar/">ClinVar</a>.
+    </div>
+    <span>nano-zyrkel · <a href="https://zyrkel.com">zyrkel.com</a></span>
   </div>
 </div>
 
