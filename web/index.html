@@ -86,10 +86,12 @@
   <!-- Footer -->
   <div class="footer">
     <span>nano-zyrkel · <a href="https://zyrkel.com">zyrkel.com</a></span>
+    <button class="export-btn" onclick="exportCSV()">Export CSV</button>
     <span class="privacy">Genomic data never leaves your browser.</span>
   </div>
 </div>
 
 <script type="module" src="app.js"></script>
+<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
 </body>
 </html>
