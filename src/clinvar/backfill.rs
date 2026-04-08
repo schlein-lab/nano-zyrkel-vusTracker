@@ -126,6 +126,11 @@ fn parse_variant_summary(path: &str) -> Result<Vec<ClinVarVariant>> {
         // (deduplicate later keeps the latest)
         let _ = assembly; // We keep both, dedup handles it
 
+        let eval_date = normalize_date(last_eval);
+
+        // Skip multi-gene CNVs (e.g. "subset of 121 genes: MBD5")
+        if gene.contains("subset of") || gene.contains(';') { continue; }
+
         variants.push(ClinVarVariant {
             variation_id: variation_id.to_string(),
             gene: gene.to_string(),
@@ -133,9 +138,9 @@ fn parse_variant_summary(path: &str) -> Result<Vec<ClinVarVariant>> {
             classification: Classification::from_str(&significance),
             review_status: review.to_string(),
             submitter: if n_submitters.is_empty() { "1".into() } else { format!("{} submitters", n_submitters) },
-            last_evaluated: last_eval.to_string(),
+            last_evaluated: eval_date.clone(),
             condition: condition.to_string(),
-            first_seen: last_eval.to_string(), // best proxy we have
+            first_seen: eval_date,
         });
 
         if line_num % 500_000 == 0 && line_num > 0 {
