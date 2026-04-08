@@ -8,6 +8,7 @@
 //!   reporter.rs — Generate embeddable HTML widget with inline SVG sparklines
 //!   state.rs    — Persistent JSONL storage (variants, reclassifications, daily stats)
 
+pub mod backfill;
 pub mod fetcher;
 pub mod parser;
 pub mod tracker;
