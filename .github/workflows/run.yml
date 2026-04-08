@@ -13,33 +13,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          lfs: true
 
-      - name: Install system deps
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - name: Download nano-zyrkel binary
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          gh release download --repo christian-schlein/nano-zyrkel \
+            --pattern "nano-zyrkel-*-linux*" --dir /tmp/bin || \
+          gh release download v0.4.0 --repo christian-schlein/nano-zyrkel \
+            --pattern "nano-zyrkel-*-linux*" --dir /tmp/bin || \
+          echo "No release binary found — building from source as fallback"
 
-      - name: Build
-        run: cargo build --release
+          # If no release binary available, build from source
+          if [ ! -f /tmp/bin/nano-zyrkel* ]; then
+            echo "Building from source..."
+            sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+            git clone --depth 1 https://$GH_TOKEN@github.com/christian-schlein/nano-zyrkel.git /tmp/nano-src
+            cd /tmp/nano-src
+            rustup default stable
+            cargo build --release
+            mkdir -p /tmp/bin
+            cp target/release/nano-zyrkel /tmp/bin/nano-zyrkel
+          fi
+          chmod +x /tmp/bin/nano-zyrkel*
+          ls -la /tmp/bin/
 
-      - name: Run tracker
+      - name: Run ClinVar tracker
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: ./target/release/vus-tracker --config hats/config.json --lang en --verbose
+        run: |
+          BINARY=$(ls /tmp/bin/nano-zyrkel* | head -1)
+          $BINARY --config hats/config.json --lang en --verbose
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -67,11 +74,11 @@ jobs:
             if [ -n "$GENE" ] && [ -n "$HGVS" ]; then
               codex exec --skip-git-repo-check --ephemeral \
                 -o "$STORY_FILE" \
-                "Write a 3-sentence historical note about the ClinVar reclassification of $HGVS in gene $GENE from $OLD to $NEW. Include: what disease this gene is associated with, and the clinical impact of this reclassification. Be factual. English only. No markdown."
+                "Write a 3-sentence historical note about the ClinVar classification change of $HGVS in gene $GENE from $OLD to $NEW. Include: what disease this gene is associated with, and the clinical significance of this change. Be factual. English only. No markdown."
               echo "Story generated for $GENE"
             fi
           else
-            echo "No reclassifications yet — skipping story"
+            echo "No classification changes yet — skipping story"
           fi
 
       - name: Commit results
