@@ -2,78 +2,158 @@
 // All computation runs locally. No data leaves the browser.
 
 let tracker = null;
-const DATA_BASE = '.'; // Relative to index.html
+const DATA_BASE = '.';
 
 async function init() {
   try {
-    // Load WASM module
     const wasm = await import('./pkg/vus_tracker_lib.js');
     await wasm.default();
     tracker = new wasm.VusTracker();
 
-    // Load variant data
-    document.getElementById('total-variants').textContent = 'Loading...';
-    const variantsResp = await fetch(`${DATA_BASE}/data/variants.jsonl`);
-    const variantsText = await variantsResp.text();
-    tracker.load_variants(variantsText);
+    document.getElementById('total-variants').textContent = 'Loading data...';
+
+    // Load variants
+    const varResp = await fetch(`${DATA_BASE}/data/variants.jsonl`);
+    if (!varResp.ok) throw new Error('variants.jsonl not found');
+    const varText = await varResp.text();
+    tracker.load_variants(varText);
 
     // Load reclassifications
     try {
-      const reclassResp = await fetch(`${DATA_BASE}/data/reclassifications.jsonl`);
-      const reclassText = await reclassResp.text();
-      tracker.load_reclassifications(reclassText);
-    } catch(e) { console.log('No reclassifications data yet'); }
+      const rResp = await fetch(`${DATA_BASE}/data/reclassifications.jsonl`);
+      if (rResp.ok) tracker.load_reclassifications(await rResp.text());
+    } catch(e) {}
 
-    // Load story of the day
+    // Load story
     try {
-      const storyResp = await fetch(`${DATA_BASE}/data/story.txt`);
-      if (storyResp.ok) {
-        const storyText = await storyResp.text();
-        if (storyText.trim()) {
+      const sResp = await fetch(`${DATA_BASE}/data/story.txt`);
+      if (sResp.ok) {
+        const txt = (await sResp.text()).trim();
+        if (txt) {
           document.getElementById('story').style.display = 'block';
-          document.getElementById('story-text').textContent = storyText.trim();
+          document.getElementById('story-text').textContent = txt;
         }
       }
     } catch(e) {}
 
-    // Load predefined panels
+    // Panels
     const panels = JSON.parse(tracker.predefined_panels());
-    const select = document.getElementById('panel-select');
+    const sel = document.getElementById('panel-select');
     panels.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.genes.join(',');
-      opt.textContent = p.name;
-      select.appendChild(opt);
+      const o = document.createElement('option');
+      o.value = p.genes.join(',');
+      o.textContent = p.name;
+      sel.appendChild(o);
     });
 
-    // Initial render
-    updateUI('7d');
+    // Initial render — all tabs
+    renderAll();
 
-    // Event listeners
+    // Events
     document.getElementById('search').addEventListener('input', onSearch);
     document.getElementById('panel-select').addEventListener('change', onPanelChange);
     setupVCFDrop();
 
-    console.log(`vusTracker loaded: ${tracker.variant_count()} variants, ${tracker.reclass_count()} reclassifications`);
+    console.log(`vusTracker: ${tracker.variant_count()} variants, ${tracker.reclass_count()} reclassifications`);
   } catch(e) {
-    console.error('WASM init failed:', e);
-    document.getElementById('total-variants').textContent = 'Failed to load';
+    console.error('Init failed:', e);
+    document.getElementById('total-variants').textContent = 'Error';
     document.getElementById('delta').textContent = e.message;
   }
 }
 
-function updateUI(range) {
+// ── Render all tabs ──────────────────────────────────────────
+
+function renderAll() {
   if (!tracker) return;
-  const statsJson = range ? tracker.set_time_range(range) : tracker.compute_stats();
-  const stats = JSON.parse(statsJson);
 
-  document.getElementById('total-variants').textContent = formatNumber(stats.total_variants || tracker.variant_count());
+  // Hero
+  const total = tracker.variant_count();
+  document.getElementById('total-variants').textContent = formatNumber(total);
+
+  // Stats
+  const stats = JSON.parse(tracker.compute_stats());
   document.getElementById('delta').textContent = `${stats.new_vus_today || 0} new VUS today`;
-  document.getElementById('trend').textContent = stats.monthly_trend ? stats.monthly_trend[1] : 'stable';
+  document.getElementById('trend').textContent = stats.monthly_trend ? stats.monthly_trend[1] : '';
 
-  // Stats tab
-  const statsList = document.getElementById('stats-list');
-  statsList.innerHTML = `
+  // Tab 0: Latest (recent reclassifications OR newest variants)
+  renderLatest();
+
+  // Tab 1: New VUS
+  renderNewVUS();
+
+  // Tab 2: Genes
+  renderGenes(stats);
+
+  // Tab 3: Stats
+  renderStats(stats);
+}
+
+function renderLatest() {
+  const el = document.getElementById('reclass-list');
+
+  // Try reclassifications first
+  if (tracker.reclass_count() > 0) {
+    // Search for any gene to get reclassified variants — use stats
+    el.innerHTML = '<div class="row" style="color:#64748b">See reclassifications in Stats tab.</div>';
+  }
+
+  // Show newest variants (any classification)
+  const newest = JSON.parse(tracker.search_variant('.'));
+  if (newest.length > 0) {
+    el.innerHTML = newest.slice(0, 15).map(v => `
+      <div class="row">
+        <span class="gene">${esc(v.gene)}</span>
+        <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
+        <span class="badge-sm ${badgeClass(v.classification)}">${shortClass(v.classification)}</span>
+      </div>
+    `).join('');
+  } else {
+    el.innerHTML = '<div class="row" style="color:#94a3b8">No data loaded.</div>';
+  }
+}
+
+function renderNewVUS() {
+  const el = document.getElementById('vus-list');
+  const vus = JSON.parse(tracker.filter_classification('VUS'));
+  if (vus.length > 0) {
+    el.innerHTML = `<div class="row" style="color:#64748b;margin-bottom:6px">${formatNumber(vus.length)} VUS total</div>` +
+      vus.slice(0, 15).map(v => `
+        <div class="row">
+          <span class="gene">${esc(v.gene)}</span>
+          <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
+          <span class="badge-sm badge-vus">VUS</span>
+        </div>
+      `).join('');
+  } else {
+    el.innerHTML = '<div class="row" style="color:#94a3b8">No VUS found.</div>';
+  }
+}
+
+function renderGenes(stats) {
+  const el = document.getElementById('gene-list');
+  if (stats.gene_discord && stats.gene_discord.length > 0) {
+    const max = stats.gene_discord[0][2] || 1;
+    el.innerHTML = stats.gene_discord.slice(0, 10).map(([gene, discord, count]) => `
+      <div class="row">
+        <span class="gene">${esc(gene)}</span>
+        <span class="val">${count} variants</span>
+      </div>
+      <div class="bar" style="width:${Math.round(count/max*100)}%"></div>
+    `).join('');
+  } else {
+    // Fallback: show top genes from search
+    const genes = ['BRCA1', 'BRCA2', 'LDLR', 'TP53', 'TTN', 'ATM', 'NF1', 'MLH1'];
+    el.innerHTML = genes.map(g => {
+      const results = JSON.parse(tracker.search_gene(g));
+      return `<div class="row"><span class="gene">${g}</span><span class="val">${results.length} variants</span></div>`;
+    }).join('');
+  }
+}
+
+function renderStats(stats) {
+  const el = document.getElementById('stats-list');
+  el.innerHTML = `
     <div class="row"><span>Lab concordance</span><span class="val">${(stats.concordance || 0).toFixed(1)}%</span></div>
     <div class="row"><span>VUS→path. (30d)</span><span class="val">${stats.vus_to_path_30d || 0}</span></div>
     <div class="row"><span>Total variants</span><span class="val">${formatNumber(stats.total_variants || 0)}</span></div>
@@ -82,26 +162,29 @@ function updateUI(range) {
   `;
 
   // VUS half-life
-  if (stats.vus_half_life_by_gene && stats.vus_half_life_by_gene.length > 0) {
-    statsList.innerHTML += '<div class="section-title" style="margin-top:8px">VUS half-life (days)</div>';
+  if (stats.vus_half_life_by_gene && stats.vus_half_life_by_gene.length) {
+    el.innerHTML += '<div class="section-title" style="margin-top:10px">VUS half-life (median days)</div>';
     stats.vus_half_life_by_gene.slice(0, 8).forEach(([gene, days]) => {
-      statsList.innerHTML += `<div class="row"><span class="gene">${esc(gene)}</span><span class="val">${Math.round(days)}d</span></div>`;
+      el.innerHTML += `<div class="row"><span class="gene">${esc(gene)}</span><span class="val">${Math.round(days)}d</span></div>`;
     });
   }
 
-  // Survival curve for LDLR
+  // LDLR survival curve
   try {
-    const curveJson = tracker.vus_survival_curve('LDLR');
-    const curve = JSON.parse(curveJson);
+    const curve = JSON.parse(tracker.vus_survival_curve('LDLR'));
     if (curve.length > 2) {
       document.getElementById('survival-chart').innerHTML = renderSurvivalSVG(curve);
+    } else {
+      document.getElementById('survival-chart').innerHTML = '<div style="color:#94a3b8;font-size:11px">Not enough LDLR data for survival curve yet.</div>';
     }
   } catch(e) {}
 }
 
+// ── Search + Panel ───────────────────────────────────────────
+
 function onSearch(e) {
   const q = e.target.value.trim();
-  if (!q || q.length < 2) return;
+  if (q.length < 2) { renderAll(); return; }
   const results = JSON.parse(tracker.search_variant(q));
   renderResults(results, document.getElementById('reclass-list'));
   showTab(0);
@@ -109,9 +192,11 @@ function onSearch(e) {
 
 function onPanelChange(e) {
   const genes = e.target.value;
-  if (!genes) return;
+  if (!genes) { renderAll(); return; }
   const results = JSON.parse(tracker.panel(genes));
   renderResults(results, document.getElementById('reclass-list'));
+  document.getElementById('reclass-list').insertAdjacentHTML('afterbegin',
+    `<div class="row" style="color:#64748b;margin-bottom:4px">${results.length} variants in panel</div>`);
   showTab(0);
 }
 
@@ -123,16 +208,17 @@ function renderResults(variants, container) {
   container.innerHTML = variants.slice(0, 30).map(v => `
     <div class="row">
       <span class="gene">${esc(v.gene)}</span>
-      <span class="hgvs">${esc(v.hgvs || '').substring(0, 30)}</span>
+      <span class="hgvs">${esc((v.hgvs||'').substring(0, 28))}</span>
       <span class="badge-sm ${badgeClass(v.classification)}">${shortClass(v.classification)}</span>
     </div>
   `).join('');
 }
 
+// ── VCF Upload ───────────────────────────────────────────────
+
 function setupVCFDrop() {
   const drop = document.getElementById('vcf-drop');
   const input = document.getElementById('vcf-input');
-  const results = document.getElementById('vcf-results');
 
   drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.borderColor = '#0f766e'; });
   drop.addEventListener('dragleave', () => { drop.style.borderColor = '#e2e8f0'; });
@@ -147,11 +233,10 @@ function setupVCFDrop() {
 async function processVCF(file) {
   const results = document.getElementById('vcf-results');
   results.style.display = 'block';
-  results.innerHTML = '<div style="color:#94a3b8">Parsing VCF...</div>';
+  results.innerHTML = '<div style="color:#94a3b8">Parsing VCF locally...</div>';
 
   const text = await file.text();
-  const matchJson = tracker.match_vcf(text);
-  const match = JSON.parse(matchJson);
+  const match = JSON.parse(tracker.match_vcf(text));
 
   results.innerHTML = `
     <div class="row"><span>Total VCF variants</span><span class="val">${match.total_vcf_variants}</span></div>
@@ -163,26 +248,36 @@ async function processVCF(file) {
   `;
 
   if (match.pathogenic?.length) {
-    results.innerHTML += '<div class="section-title" style="margin-top:8px">Pathogenic matches</div>';
-    match.pathogenic.forEach(m => {
+    results.innerHTML += '<div class="section-title" style="margin-top:8px">Pathogenic</div>';
+    match.pathogenic.slice(0, 20).forEach(m => {
       results.innerHTML += `<div class="row"><span class="gene">${esc(m.gene)}</span><span class="hgvs">${esc(m.hgvs).substring(0,25)}</span><span class="badge-sm badge-path">path.</span></div>`;
+    });
+  }
+  if (match.vus?.length) {
+    results.innerHTML += '<div class="section-title" style="margin-top:8px">VUS</div>';
+    match.vus.slice(0, 20).forEach(m => {
+      results.innerHTML += `<div class="row"><span class="gene">${esc(m.gene)}</span><span class="hgvs">${esc(m.hgvs).substring(0,25)}</span><span class="badge-sm badge-vus">VUS</span></div>`;
     });
   }
 }
 
+// ── Survival SVG ─────────────────────────────────────────────
+
 function renderSurvivalSVG(curve) {
   if (!curve.length) return '';
   const w = 360, h = 80;
-  const maxDays = Math.max(...curve.map(c => c[0]), 365);
-  const points = curve.map(([d, s]) => `${(d/maxDays*w).toFixed(1)},${((1-s)*h).toFixed(1)}`).join(' ');
+  const maxD = Math.max(...curve.map(c => c[0]), 365);
+  const pts = curve.map(([d,s]) => `${(d/maxD*w).toFixed(1)},${((1-s)*h).toFixed(1)}`).join(' ');
   return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;">
-    <polyline points="${points}" fill="none" stroke="#0d9488" stroke-width="1.5"/>
-    <text x="${w-5}" y="${h-5}" text-anchor="end" fill="#94a3b8" font-size="8">days</text>
-    <text x="5" y="10" fill="#94a3b8" font-size="8">100%</text>
+    <polyline points="${pts}" fill="none" stroke="#0f766e" stroke-width="2"/>
+    <text x="${w-5}" y="${h-3}" text-anchor="end" fill="#94a3b8" font-size="8">days →</text>
+    <text x="3" y="10" fill="#94a3b8" font-size="8">100% VUS</text>
+    <text x="3" y="${h-3}" fill="#94a3b8" font-size="8">0%</text>
   </svg>`;
 }
 
-// UI helpers
+// ── UI Helpers ────────────────────────────────────────────────
+
 window.showTab = function(n) {
   document.querySelectorAll('.tab-content').forEach((t,i) => t.classList.toggle('active', i===n));
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', i===n));
@@ -191,38 +286,51 @@ window.showTab = function(n) {
 window.setRange = function(range) {
   document.querySelectorAll('.time-bar button').forEach(b => b.classList.remove('active'));
   event.target.classList.add('active');
-  updateUI(range);
+  if (!tracker) return;
+  const stats = JSON.parse(tracker.set_time_range(range));
+  document.getElementById('total-variants').textContent = formatNumber(stats.total_variants || tracker.variant_count());
+  document.getElementById('delta').textContent = `${stats.new_vus_today || 0} new VUS today`;
+  renderStats(stats);
+  renderGenes(stats);
 };
 
 function formatNumber(n) {
   if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return Math.floor(n/1e3) + ',' + String(n%1e3).padStart(3,'0');
+  if (n >= 1e3) return Math.floor(n/1e3).toLocaleString('en-US');
   return String(n);
 }
 
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function badgeClass(c) {
-  if (!c) return '';
-  const l = (typeof c === 'string' ? c : '').toLowerCase();
-  if (l.includes('pathogenic') && !l.includes('likely')) return 'badge-path';
-  if (l.includes('uncertain') || l === 'vus') return 'badge-vus';
-  if (l.includes('benign')) return 'badge-benign';
-  if (l.includes('conflicting')) return 'badge-confl';
+  const s = shortClass(c);
+  if (s.includes('path')) return 'badge-path';
+  if (s === 'VUS') return 'badge-vus';
+  if (s.includes('ben')) return 'badge-benign';
+  if (s.includes('confl')) return 'badge-confl';
   return '';
 }
 
 function shortClass(c) {
   if (!c) return '?';
-  const l = (typeof c === 'string' ? c : JSON.stringify(c)).toLowerCase();
+  if (typeof c === 'object') {
+    if ('Pathogenic' in c || c === 'Pathogenic') return 'path.';
+    if ('LikelyPathogenic' in c || c === 'LikelyPathogenic') return 'l.path.';
+    if ('Vus' in c || c === 'Vus') return 'VUS';
+    if ('LikelyBenign' in c || c === 'LikelyBenign') return 'l.ben.';
+    if ('Benign' in c || c === 'Benign') return 'benign';
+    if ('ConflictingInterpretations' in c || c === 'ConflictingInterpretations') return 'confl.';
+    if ('Other' in c) return c.Other || '?';
+    return JSON.stringify(c).substring(0,8);
+  }
+  const l = String(c).toLowerCase();
   if (l.includes('pathogenic') && l.includes('likely')) return 'l.path.';
   if (l.includes('pathogenic')) return 'path.';
-  if (l.includes('uncertain') || l.includes('vus')) return 'VUS';
+  if (l.includes('uncertain') || l === 'vus') return 'VUS';
   if (l.includes('benign') && l.includes('likely')) return 'l.ben.';
   if (l.includes('benign')) return 'benign';
   if (l.includes('conflicting')) return 'confl.';
   return '?';
 }
 
-// Boot
 init();
