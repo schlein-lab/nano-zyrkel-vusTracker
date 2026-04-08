@@ -87,10 +87,28 @@ jobs:
 
       - name: Deploy to gh-pages branch
         run: |
-          cd pages
-          git init
+          # Clone existing gh-pages to preserve data files (chunks, index, etc.)
+          git clone --branch gh-pages --single-branch --depth 1 \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" deploy \
+            || mkdir deploy
+          cd deploy
           git config user.name "nano-zyrkel"
           git config user.email "nano@zyrkel.local"
+
+          # Update frontend + WASM (always)
+          cp ../pages/index.html ../pages/app.js ../pages/style.css . 2>/dev/null || true
+          cp ../pages/sw.js . 2>/dev/null || true
+          mkdir -p pkg
+          cp ../pages/pkg/* pkg/ 2>/dev/null || true
+
+          # Update data files only if they exist in this build
+          if [ -d ../pages/data ]; then
+            cp -r ../pages/data/* data/ 2>/dev/null || true
+          fi
+          if [ -f ../pages/feed.xml ]; then
+            cp ../pages/feed.xml . 2>/dev/null || true
+          fi
+
           git add -A
-          git commit -m "deploy $(date -u +%Y-%m-%dT%H:%M)"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" master:gh-pages
+          git diff --staged --quiet || git commit -m "deploy $(date -u +%Y-%m-%dT%H:%M)"
+          git push || true
