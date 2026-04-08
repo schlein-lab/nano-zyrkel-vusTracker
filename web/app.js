@@ -185,20 +185,37 @@ function renderStats(stats) {
   } catch(e) {}
 }
 
-function renderLDLR() {
+async function renderLDLR() {
   const el = document.getElementById('ldlr-stats');
   if (!el) return;
+
+  // Try loading dedicated LDLR gene file (all LDLR variants)
+  try {
+    const resp = await fetch(`${DATA_BASE}/data/gene_LDLR.jsonl`);
+    if (resp.ok) {
+      const text = await resp.text();
+      tracker.load_variants(text); // Append to existing data
+      console.log('LDLR gene file loaded');
+    }
+  } catch(e) {}
+
   try {
     const ldlr = JSON.parse(tracker.search_gene('LDLR'));
     const vus = ldlr.filter(v => shortClass(v.classification) === 'VUS').length;
     const path = ldlr.filter(v => shortClass(v.classification).includes('path')).length;
     const benign = ldlr.filter(v => shortClass(v.classification).includes('ben')).length;
     el.innerHTML = `
-      <div class="row"><span>LDLR variants</span><span class="val">${ldlr.length}</span></div>
+      <div class="row"><span>LDLR variants (all time)</span><span class="val">${formatNumber(ldlr.length)}</span></div>
       <div class="row"><span class="badge-sm badge-path">Pathogenic</span><span class="val">${path}</span></div>
       <div class="row"><span class="badge-sm badge-vus">VUS</span><span class="val">${vus}</span></div>
       <div class="row"><span class="badge-sm badge-benign">Benign</span><span class="val">${benign}</span></div>
     `;
+
+    // Update survival curve with full LDLR data
+    const curve = JSON.parse(tracker.vus_survival_curve('LDLR'));
+    if (curve.length > 2) {
+      document.getElementById('survival-chart').innerHTML = renderSurvivalSVG(curve);
+    }
   } catch(e) {
     el.innerHTML = '<div style="color:#94a3b8;font-size:11px">Loading LDLR data...</div>';
   }
