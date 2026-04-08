@@ -36,6 +36,10 @@ struct Cli {
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
+
+    /// Backfill: path to NCBI variant_summary.txt (one-time full ClinVar import)
+    #[arg(long)]
+    backfill: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -51,6 +55,17 @@ async fn main() -> Result<()> {
         )
         .compact()
         .init();
+
+    // ── Backfill mode: one-time ClinVar full import ──
+    if let Some(backfill_path) = &cli.backfill {
+        let config = HatConfig::load(&cli.config)
+            .with_context(|| format!("Failed to load config: {}", cli.config.display()))?;
+        let staging_dir = format!("{}/{}", config.output_dir, config.id);
+        return clinvar::backfill::run_backfill(
+            &backfill_path.to_string_lossy(),
+            &staging_dir,
+        ).map_err(Into::into);
+    }
 
     let config = HatConfig::load(&cli.config)
         .with_context(|| format!("Failed to load config: {}", cli.config.display()))?;
