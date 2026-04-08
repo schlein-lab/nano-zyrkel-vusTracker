@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>ClinVar Live Tracker</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#fafbfc;color:#1a1a2e}
+.w{max-width:400px;margin:0 auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;background:#fff}
+.hd{background:#0f766e;color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:baseline}
+.hd h1{font-size:13px;font-weight:600;letter-spacing:.02em}
+.hd .d{font-size:12px;opacity:.85}
+.bn{padding:12px 18px 4px;font-size:36px;font-weight:700;color:#0f766e}
+.st{padding:0 18px 12px;font-size:11px;color:#64748b}
+.sp{padding:0 18px 12px}
+.sec{padding:10px 18px;border-top:1px solid #f1f5f9}
+.sec-t{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8;margin-bottom:6px}
+.r{display:flex;justify-content:space-between;font-size:12px;padding:3px 0}
+.r .g{font-weight:600;color:#334155}
+.r .v{color:#64748b}
+.b{font-size:10px;padding:1px 6px;border-radius:4px;display:inline-block}
+.bp{background:#fef2f2;color:#dc2626}
+.bv{background:#fefce8;color:#ca8a04}
+.bb{background:#f0fdf4;color:#16a34a}
+.tabs{display:flex;border-top:1px solid #f1f5f9}
+.tab{flex:1;text-align:center;padding:8px;font-size:10px;color:#64748b;cursor:pointer;border:none;background:none}
+.tab.a{color:#0f766e;font-weight:600;border-bottom:2px solid #0f766e}
+.pg{display:none}.pg.a{display:block}
+.ft{padding:8px 18px;font-size:9px;color:#cbd5e1;text-align:center;border-top:1px solid #f1f5f9}
+.bar{height:6px;border-radius:3px;background:#0d9488;margin:2px 0}
+</style>
+</head>
+<body>
+<div class="w">
+<div class="hd"><h1>ClinVar Live</h1><span class="d">+0 today</span></div>
+<div class="bn">0</div>
+<div class="st">variants tracked &middot; stable</div>
+<div class="sp"><svg viewBox="0 0 360 40" style="width:100%;height:40px;"><text x="180" y="25" text-anchor="middle" fill="#cbd5e1" font-size="11">awaiting data</text></svg></div>
+<div class="tabs">
+<button class="tab a" onclick="sp(0)">Latest</button>
+<button class="tab" onclick="sp(1)">New VUS</button>
+<button class="tab" onclick="sp(2)">Genes</button>
+<button class="tab" onclick="sp(3)">Reclass.</button>
+<button class="tab" onclick="sp(4)">Stats</button>
+</div>
+<div class="pg a" id="p0"><div class="sec"><div class="sec-t">Recent reclassifications</div><div class="r" style="color:#94a3b8">No reclassifications yet.</div></div></div>
+<div class="pg" id="p1"><div class="sec"><div class="sec-t">Newest VUS submissions</div><div class="r" style="color:#94a3b8">No new VUS today.</div></div></div>
+<div class="pg" id="p2"><div class="sec"><div class="sec-t">Most active genes (7d)</div><div class="r" style="color:#94a3b8">Awaiting data…</div></div></div>
+<div class="pg" id="p3"><div class="sec"><div class="sec-t">VUS half-life (median days)</div><div class="r" style="color:#94a3b8">Not enough data yet.</div></div></div>
+<div class="pg" id="p4"><div class="sec"><div class="sec-t">Key metrics</div>
+<div class="r"><span>Lab concordance</span><span class="v">100.0%</span></div>
+<div class="r"><span>VUS&#x2192;path. (30d)</span><span class="v">0</span></div>
+<div class="r"><span>Reclass. trend</span><span class="v">&#x25AC; stable</span></div>
+<div class="r"><span>New VUS today</span><span class="v">0</span></div>
+<div class="r"><span>Agent running</span><span class="v">1d</span></div>
+</div></div>
+<div class="ft">nano-zyrkel &middot; <a href="https://zyrkel.com" style="color:#cbd5e1">zyrkel.com</a> &middot; &#x25CF;&thinsp;live</div>
+</div>
+<script>function sp(n){document.querySelectorAll('.pg').forEach((p,i)=>p.classList.toggle('a',i===n));document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('a',i===n))}</script>
+</body></html>
