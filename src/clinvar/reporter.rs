@@ -34,7 +34,7 @@ pub fn generate_widget(agg: &AggregateStats, state: &ClinVarState) -> String {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width">
-<title>ClinVar Live Tracker</title>
+<title>nano-zyrkel-vusTracker live</title>
 <style>
 *{{margin:0;padding:0;box-sizing:border-box}}
 body{{font-family:'Segoe UI',system-ui,sans-serif;background:#fafbfc;color:#1a1a2e}}
@@ -64,7 +64,7 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:#fafbfc;color:#1a1a
 </head>
 <body>
 <div class="w">
-<div class="hd"><h1>ClinVar Live</h1><span class="d">+{today_new} today</span></div>
+<div class="hd"><h1>nano-zyrkel-vusTracker</h1><span class="d">+{today_new} today</span></div>
 <div class="bn">{total}</div>
 <div class="st">variants tracked &middot; {trend}</div>
 <div class="sp">{sparkline}</div>
@@ -84,9 +84,12 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:#fafbfc;color:#1a1a
 <div class="r"><span>VUS&#x2192;path. (30d)</span><span class="v">{vtp}</span></div>
 <div class="r"><span>Reclass. trend</span><span class="v">{trend_arrow}</span></div>
 <div class="r"><span>New VUS today</span><span class="v">{nvt}</span></div>
-<div class="r"><span>Agent running</span><span class="v">{days}d</span></div>
+<div class="r"><span>Active since</span><span class="v">{start_date}</span></div>
+<div class="r"><span>Running for</span><span class="v">{days}d</span></div>
+<div class="r"><span>Total variants</span><span class="v">{total_all}</span></div>
+<div class="r"><span>Total reclass.</span><span class="v">{total_reclass}</span></div>
 </div></div>
-<div class="ft">nano-zyrkel &middot; <a href="https://zyrkel.com" style="color:#cbd5e1">zyrkel.com</a> &middot; &#x25CF;&thinsp;live</div>
+<div class="ft">nano-zyrkel &middot; autonomous agent &middot; <a href="https://zyrkel.com" style="color:#cbd5e1">zyrkel.com</a> &middot; &#x25CF;&thinsp;live</div>
 </div>
 <script>function sp(n){{document.querySelectorAll('.pg').forEach((p,i)=>p.classList.toggle('a',i===n));document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('a',i===n))}}</script>
 </body></html>"#,
@@ -103,6 +106,9 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:#fafbfc;color:#1a1a
         trend_arrow = trend_arrow,
         nvt = agg.new_vus_today,
         days = agent_days,
+        start_date = agg.agent_start_date,
+        total_all = format_number(agg.total_variants),
+        total_reclass = agg.total_reclassifications,
     )
 }
 

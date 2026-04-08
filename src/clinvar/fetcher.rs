@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 pub async fn fetch_new_variant_ids(max: u32, delay_ms: u64) -> Result<Vec<String>> {
     let url = format!(
         "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi\
-         ?db=clinvar&term=last+2+days[CRDT]&retmax={}&retmode=json",
+         ?db=clinvar&term=%22last+7+days%22%5Bdp%5D&retmax={}&retmode=json",
         max
     );
 
