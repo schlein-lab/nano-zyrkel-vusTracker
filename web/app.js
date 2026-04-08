@@ -5,6 +5,29 @@ let focusGene = '', activeRange = 'all', searchTimeout = null, acIndex = -1;
 const DATA_BASE = '.';
 const currentFilters = { gene:'', classes:[0,1,2,3,4,5,6], date_from:'', search:'', sort_by:'date', sort_asc:false, limit:50, offset:0 };
 const $ = id => document.getElementById(id);
+let lastHeroGene = '';
+
+window.toggleSection = function(el) {
+  const body = el.nextElementSibling;
+  if (body) {
+    el.classList.toggle('collapsed');
+    body.classList.toggle('collapsed');
+  }
+};
+
+function animateNumber(el, target, duration = 800) {
+  const start = 0;
+  const startTime = performance.now();
+  function frame(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = Math.round(start + (target - start) * eased);
+    el.textContent = fmt(current);
+    if (progress < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
 
 async function init() {
   try {
@@ -38,23 +61,26 @@ function renderOverview() {
 
 function renderHero() {
   if (!indexCache) return;
+  const heroEl = $('hero-number');
   if (activeRange === 'all' || !indexCache.by_period?.[activeRange]) {
-    $('hero-number').textContent = fmt(indexCache.total_variants || 0);
+    const target = indexCache.total_variants || 0;
+    if (lastHeroGene !== '__overview__') { animateNumber(heroEl, target); lastHeroGene = '__overview__'; }
+    else heroEl.textContent = fmt(target);
     $('hero-subtitle').textContent = `${fmt(indexCache.total_reclassifications || 0)} classification changes \u00B7 ${indexCache.date_range?.from || '1965'} \u2014 ${indexCache.date_range?.to || '2026'}`;
   } else {
     const p = indexCache.by_period[activeRange];
-    $('hero-number').textContent = fmt(p.total || 0);
+    heroEl.textContent = fmt(p.total || 0);
     $('hero-subtitle').textContent = `${fmt(p.changes || p.reclassifications || 0)} changes in ${rangeLabel(activeRange)}`;
   }
 }
 
 function renderTopGenes() {
   const el = $('top-genes-section'), top = indexCache?.top_genes || [];
-  if (!top.length) { el.innerHTML = '<div class="section-title">Top Genes</div><div style="color:#94a3b8;font-size:10px;">No gene data.</div>'; return; }
+  if (!top.length) { el.innerHTML = '<div class="section-title">Top Genes</div><div class="section-body"><div style="color:#94a3b8;font-size:10px;">No gene data.</div></div>'; return; }
   const max = top[0]?.[1] || 1;
-  el.innerHTML = '<div class="section-title">Top Genes</div>' + top.slice(0, 15).map(([g, c]) =>
+  el.innerHTML = '<div class="section-title" onclick="toggleSection(this)">Top Genes</div><div class="section-body">' + top.slice(0, 15).map(([g, c]) =>
     `<div class="row clickable-row" onclick="selectGene('${esc(g)}')" style="cursor:pointer;"><span class="gene">${esc(g)}</span><span class="val">${fmt(c)} variants</span></div><div class="bar" style="width:${Math.round(c/max*100)}%"></div>`
-  ).join('');
+  ).join('') + '</div>';
 }
 
 // ── Gene Selection ─────────────────────────────────────────
@@ -65,7 +91,10 @@ window.selectGene = async function(gene) {
   history.replaceState(null, '', '?gene=' + encodeURIComponent(gene));
   $('overview-mode').style.display = 'none'; $('gene-mode').style.display = ''; $('clear-btn').style.display = '';
   renderGeneHeader(gene); renderFilterBar();
-  $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[gene]?.total || 0);
+  const geneTotal = indexCache?.gene_breakdowns?.[gene]?.total || 0;
+  const heroEl = $('hero-number');
+  if (lastHeroGene !== gene) { animateNumber(heroEl, geneTotal); lastHeroGene = gene; }
+  else heroEl.textContent = fmt(geneTotal);
   $('hero-subtitle').textContent = `${esc(gene)} variants tracked`;
   const chunkId = indexCache?.gene_to_chunk?.[gene];
   if (chunkId != null && !loadedChunks.has(chunkId)) {
@@ -130,7 +159,7 @@ function donutSVG(path, vus, ben, confl, total) {
   let off = 0;
   return `<svg viewBox="0 0 40 40" style="width:36px;height:36px;">${segs.map(s => {
     const len = (s.val/total)*circ, o = off; off += len;
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len} ${circ-len}" stroke-dashoffset="${-o}"/>`;
+    return `<circle class="donut-segment" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len} ${circ-len}" stroke-dashoffset="${-o}"/>`;
   }).join('')}</svg>`;
 }
 
@@ -193,8 +222,21 @@ window.setRange = function(range) {
   event.target.classList.add('active');
   if (focusGene) {
     currentFilters.date_from = range !== 'all' ? rangeToDate(range) : '';
-    $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
-    $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
+    const cid = indexCache?.gene_to_chunk?.[focusGene];
+    if (range !== 'all' && tracker && cid != null && loadedChunks.has(cid)) {
+      try {
+        const result = JSON.parse(tracker.query(JSON.stringify({ gene: focusGene, date_from: rangeToDate(range), limit: 0 })));
+        const totalAll = indexCache?.gene_breakdowns?.[focusGene]?.total || 0;
+        $('hero-number').textContent = fmt(result.filtered || 0);
+        $('hero-subtitle').textContent = `${fmt(result.filtered||0)} of ${fmt(totalAll)} ${esc(focusGene)} variants (${rangeLabel(range)})`;
+      } catch(e) {
+        $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
+        $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
+      }
+    } else {
+      $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
+      $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
+    }
     renderVariantList();
   } else renderHero();
 };
@@ -254,8 +296,8 @@ function renderDrift(gene) {
   for (let i=0;i<n;i++) { const s=snaps[i], t=(s.path||0)+(s.vus||0)+(s.ben||0), x=10+i*xStep;
     if(!t){pts.push({x,pY:h-10,vY:h-10});continue;} const aH=h-20; pts.push({x,pY:10+(1-(s.path||0)/t)*aH,vY:10+(1-(s.path||0)/t-(s.vus||0)/t)*aH}); }
   const area=(up,lo)=>up.map((v,i)=>`${pts[i].x},${v}`).join(' ')+' '+[...lo].reverse().map((v,i)=>`${pts[n-1-i].x},${v}`).join(' ');
-  const labels=`<text x="10" y="${h-1}" fill="#94a3b8" font-size="5">${snaps[0].month}</text><text x="${w/2}" y="${h-1}" text-anchor="middle" fill="#94a3b8" font-size="5">${snaps[Math.floor(n/2)].month}</text><text x="${w-10}" y="${h-1}" text-anchor="end" fill="#94a3b8" font-size="5">${snaps[n-1].month}</text>`;
-  el.innerHTML = `<div class="section-title">Classification Drift</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><polygon points="${area(pts.map(p=>10),pts.map(p=>p.vY))}" fill="#0f766e" opacity="0.6"/><polygon points="${area(pts.map(p=>p.vY),pts.map(p=>p.pY))}" fill="#d97706" opacity="0.6"/><polygon points="${area(pts.map(p=>p.pY),pts.map(()=>h-10))}" fill="#dc2626" opacity="0.6"/>${labels}<text x="${w-10}" y="8" text-anchor="end" fill="#94a3b8" font-size="5"><tspan fill="#dc2626">\u25CF</tspan> path <tspan fill="#d97706">\u25CF</tspan> VUS <tspan fill="#0f766e">\u25CF</tspan> ben</text></svg>`;
+  const labels=`<text x="10" y="${h-1}" fill="#64748b" font-size="9">${snaps[0].month}</text><text x="${w/2}" y="${h-1}" text-anchor="middle" fill="#64748b" font-size="9">${snaps[Math.floor(n/2)].month}</text><text x="${w-10}" y="${h-1}" text-anchor="end" fill="#64748b" font-size="9">${snaps[n-1].month}</text>`;
+  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Classification Drift</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><polygon points="${area(pts.map(p=>10),pts.map(p=>p.vY))}" fill="#0f766e" opacity="0.6"/><polygon points="${area(pts.map(p=>p.vY),pts.map(p=>p.pY))}" fill="#d97706" opacity="0.6"/><polygon points="${area(pts.map(p=>p.pY),pts.map(()=>h-10))}" fill="#dc2626" opacity="0.6"/>${labels}<text x="${w-10}" y="8" text-anchor="end" fill="#64748b" font-size="9"><tspan fill="#dc2626">\u25CF</tspan> path <tspan fill="#d97706">\u25CF</tspan> VUS <tspan fill="#0f766e">\u25CF</tspan> ben</text></svg></div>`;
 }
 
 function renderHotspots(gene) {
@@ -266,7 +308,7 @@ function renderHotspots(gene) {
   const minP=Math.min(...data.map(d=>d.start)), maxP=Math.max(...data.map(d=>d.end)), span=maxP-minP||1, w=400, h=40;
   const blocks = data.map(d => { const x=((d.start-minP)/span)*(w-20)+10, bw=Math.max(2,((d.end-d.start)/span)*(w-20)), pf=d.total?(d.pathogenic||0)/d.total:0;
     return `<rect x="${x}" y="8" width="${bw}" height="20" rx="2" fill="rgb(${Math.round(100+pf*155)},${Math.round(60-pf*40)},${Math.round(60-pf*40)})" opacity="0.85"><title>${d.region||''}: ${d.total} variants (${d.pathogenic||0} path.)</title></rect>`; }).join('');
-  el.innerHTML = `<div class="section-title">Hotspot Map</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><rect x="10" y="16" width="${w-20}" height="4" rx="2" fill="#e2e8f0"/>${blocks}<text x="10" y="${h-2}" fill="#94a3b8" font-size="5">${minP.toLocaleString()}</text><text x="${w-10}" y="${h-2}" text-anchor="end" fill="#94a3b8" font-size="5">${maxP.toLocaleString()}</text></svg>`;
+  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Hotspot Map</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><rect x="10" y="16" width="${w-20}" height="4" rx="2" fill="#e2e8f0"/>${blocks}<text x="10" y="${h-2}" fill="#64748b" font-size="9">${minP.toLocaleString()}</text><text x="${w-10}" y="${h-2}" text-anchor="end" fill="#64748b" font-size="9">${maxP.toLocaleString()}</text></svg></div>`;
 }
 
 function renderTimeline(gene) {
@@ -280,8 +322,8 @@ function renderTimeline(gene) {
   const maxY=Math.max(1,...cats.map(c=>c.total)), xAt=i=>pad.l+(i/Math.max(1,n-1))*pw, yAt=v=>pad.t+ph-(v/maxY)*ph;
   const ap=(up,lo)=>'M'+up.map((v,i)=>`${xAt(i)},${yAt(v)}`).join(' L')+' L'+[...lo].reverse().map((v,i)=>`${xAt(n-1-i)},${yAt(v)}`).join(' L')+' Z';
   const step=Math.max(1,Math.floor(n/5));
-  const labels=keys.filter((_,i)=>i%step===0||i===n-1).map(k=>`<text x="${xAt(keys.indexOf(k))}" y="${h-2}" text-anchor="middle" fill="#94a3b8" font-size="6">${k.slice(2,7)}</text>`).join('');
-  el.innerHTML = `<div class="section-title">Submissions Timeline</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;" preserveAspectRatio="none"><path d="${ap(cats.map(c=>c.b),cats.map(()=>0))}" fill="#16a34a" opacity="0.5"/><path d="${ap(cats.map(c=>c.b+c.v),cats.map(c=>c.b))}" fill="#eab308" opacity="0.5"/><path d="${ap(cats.map(c=>c.total),cats.map(c=>c.b+c.v))}" fill="#dc2626" opacity="0.5"/>${labels}<text x="${pad.l-3}" y="${pad.t+4}" text-anchor="end" fill="#94a3b8" font-size="6">${maxY}</text><text x="${pad.l-3}" y="${yAt(0)+1}" text-anchor="end" fill="#94a3b8" font-size="6">0</text></svg>`;
+  const labels=keys.filter((_,i)=>i%step===0||i===n-1).map(k=>`<text x="${xAt(keys.indexOf(k))}" y="${h-2}" text-anchor="middle" fill="#64748b" font-size="9">${k.slice(2,7)}</text>`).join('');
+  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">Submissions Timeline</div><div class="section-body collapsed"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;" preserveAspectRatio="none"><path d="${ap(cats.map(c=>c.b),cats.map(()=>0))}" fill="#16a34a" opacity="0.5"/><path d="${ap(cats.map(c=>c.b+c.v),cats.map(c=>c.b))}" fill="#eab308" opacity="0.5"/><path d="${ap(cats.map(c=>c.total),cats.map(c=>c.b+c.v))}" fill="#dc2626" opacity="0.5"/>${labels}<text x="${pad.l-3}" y="${pad.t+4}" text-anchor="end" fill="#64748b" font-size="9">${maxY}</text><text x="${pad.l-3}" y="${yAt(0)+1}" text-anchor="end" fill="#64748b" font-size="9">0</text></svg></div>`;
 }
 
 function renderConcordance(gene) {
@@ -291,7 +333,7 @@ function renderConcordance(gene) {
   if (!data.length) { el.innerHTML=''; return; }
   const rows = data.slice(0,20).map(r => { const s=r.discordance_score||0, bW=Math.round(s*60), red=Math.round(s*220+35), grn=Math.round((1-s)*180+40);
     return `<tr><td style="font-size:9px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.hgvs)}">${esc(r.hgvs)}</td><td><span class="badge-sm ${badgeClass(r.classification)}">${esc(r.classification)}</span></td><td style="font-size:8px;color:#64748b;">${esc(r.submitter)}</td><td><svg width="64" height="10" style="vertical-align:middle;"><rect x="0" y="1" width="${bW}" height="8" rx="2" fill="rgb(${red},${grn},60)"/><rect x="0" y="1" width="60" height="8" rx="2" fill="none" stroke="#e2e8f0" stroke-width="0.5"/></svg></td></tr>`; }).join('');
-  el.innerHTML = `<div class="section-title">Submitter Concordance</div><table style="width:100%;border-collapse:collapse;font-size:9px;"><thead><tr style="color:#94a3b8;text-align:left;"><th>Variant</th><th>Class</th><th>Submitters</th><th>Discordance</th></tr></thead><tbody>${rows}</tbody></table>`;
+  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">Submitter Concordance</div><div class="section-body collapsed"><table style="width:100%;border-collapse:collapse;font-size:9px;"><thead><tr style="color:#94a3b8;text-align:left;"><th>Variant</th><th>Class</th><th>Submitters</th><th>Discordance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderSurvival(gene) {
@@ -304,10 +346,10 @@ function renderSurvival(gene) {
   const xAt=d=>pad.l+(d/maxX)*pw, yAt=f=>pad.t+ph-f*ph;
   const line=pts.map(p=>`${xAt(p.days??p.x)},${yAt(p.fraction??p.y)}`).join(' L');
   const circles=pts.filter((_,i)=>i%Math.max(1,Math.floor(pts.length/20))===0).map(p=>{const d=p.days??p.x,f=p.fraction??p.y;return `<circle cx="${xAt(d)}" cy="${yAt(f)}" r="3" fill="#0f766e" opacity="0"><title>Day ${d}: ${(f*100).toFixed(1)}% still VUS</title></circle><circle cx="${xAt(d)}" cy="${yAt(f)}" r="8" fill="transparent"><title>Day ${d}: ${(f*100).toFixed(1)}% still VUS</title></circle>`;}).join('');
-  const xL=[0,Math.round(maxX/2),maxX].map(d=>`<text x="${xAt(d)}" y="${h-3}" text-anchor="middle" fill="#94a3b8" font-size="6">${d}d</text>`).join('');
-  const yL=[0,0.5,1].map(f=>`<text x="${pad.l-3}" y="${yAt(f)+2}" text-anchor="end" fill="#94a3b8" font-size="6">${f}</text>`).join('');
+  const xL=[0,Math.round(maxX/2),maxX].map(d=>`<text x="${xAt(d)}" y="${h-3}" text-anchor="middle" fill="#64748b" font-size="9">${d}d</text>`).join('');
+  const yL=[0,0.5,1].map(f=>`<text x="${pad.l-3}" y="${yAt(f)+2}" text-anchor="end" fill="#64748b" font-size="9">${f}</text>`).join('');
   const grid=[0.25,0.5,0.75].map(f=>`<line x1="${pad.l}" y1="${yAt(f)}" x2="${w-pad.r}" y2="${yAt(f)}" stroke="#f1f5f9" stroke-width="0.5"/>`).join('');
-  el.innerHTML = `<div class="section-title">VUS Survival Curve</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100px;">${grid}<polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="1.5"/>${circles}${xL}${yL}<text x="${w/2}" y="${h}" text-anchor="middle" fill="#94a3b8" font-size="5">days since VUS submission</text></svg>`;
+  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">VUS Survival Curve</div><div class="section-body collapsed"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100px;">${grid}<polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="1.5"/>${circles}${xL}${yL}<text x="${w/2}" y="${h}" text-anchor="middle" fill="#64748b" font-size="9">days since VUS submission</text></svg></div>`;
 }
 
 function renderIdeogram() {
@@ -320,8 +362,8 @@ function renderIdeogram() {
     let p=`<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" rx="3" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="0.5"/>`;
     for (const pos of Object.keys(cb).map(Number).sort((a,b)=>a-b)) { const c=cb[pos],f=c/maxCount,by=y0+(pos/(cL[chr]*1e6||1))*chrH,bh=Math.max(1,(1/(cL[chr]||1))*chrH);
       p+=`<rect x="${x}" y="${by}" width="${barW}" height="${bh}" fill="rgb(${15-Math.round(f*15)},${118-Math.round(f*48)},${110-Math.round(f*40)})" opacity="${0.3+f*0.7}"><title>${chr}:${pos} \u2014 ${c} variants</title></rect>`; }
-    return p+`<text x="${x+barW/2}" y="${h-4}" text-anchor="middle" fill="#64748b" font-size="5">${chr.replace('chr','')}</text>`; }).join('');
-  el.innerHTML = `<div class="section-title">Chromosome Ideogram</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">${elems}</svg>`;
+    return p+`<text x="${x+barW/2}" y="${h-4}" text-anchor="middle" fill="#64748b" font-size="9">${chr.replace('chr','')}</text>`; }).join('');
+  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Chromosome Ideogram</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">${elems}</svg></div>`;
 }
 
 // ── Report Date ────────────────────────────────────────────
