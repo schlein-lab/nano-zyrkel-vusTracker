@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true
+          lfs: false  # LFS budget exceeded — chunks generated from NCBI data, not LFS
 
       - name: Install Rust + WASM target
         uses: dtolnay/rust-toolchain@stable
