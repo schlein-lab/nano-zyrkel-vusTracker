@@ -5,6 +5,29 @@ let focusGene = '', activeRange = 'all', searchTimeout = null, acIndex = -1;
 const DATA_BASE = '.';
 const currentFilters = { gene:'', classes:[0,1,2,3,4,5,6], date_from:'', search:'', sort_by:'date', sort_asc:false, limit:50, offset:0 };
 const $ = id => document.getElementById(id);
+let lastHeroGene = '';
+
+window.toggleSection = function(el) {
+  const body = el.nextElementSibling;
+  if (body) {
+    el.classList.toggle('collapsed');
+    body.classList.toggle('collapsed');
+  }
+};
+
+function animateNumber(el, target, duration = 800) {
+  const start = 0;
+  const startTime = performance.now();
+  function frame(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    const current = Math.round(start + (target - start) * eased);
+    el.textContent = fmt(current);
+    if (progress < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
 
 async function init() {
   try {
@@ -38,23 +61,26 @@ function renderOverview() {
 
 function renderHero() {
   if (!indexCache) return;
+  const heroEl = $('hero-number');
   if (activeRange === 'all' || !indexCache.by_period?.[activeRange]) {
-    $('hero-number').textContent = fmt(indexCache.total_variants || 0);
+    const target = indexCache.total_variants || 0;
+    if (lastHeroGene !== '__overview__') { animateNumber(heroEl, target); lastHeroGene = '__overview__'; }
+    else heroEl.textContent = fmt(target);
     $('hero-subtitle').textContent = `${fmt(indexCache.total_reclassifications || 0)} classification changes \u00B7 ${indexCache.date_range?.from || '1965'} \u2014 ${indexCache.date_range?.to || '2026'}`;
   } else {
     const p = indexCache.by_period[activeRange];
-    $('hero-number').textContent = fmt(p.total || 0);
+    heroEl.textContent = fmt(p.total || 0);
     $('hero-subtitle').textContent = `${fmt(p.changes || p.reclassifications || 0)} changes in ${rangeLabel(activeRange)}`;
   }
 }
 
 function renderTopGenes() {
   const el = $('top-genes-section'), top = indexCache?.top_genes || [];
-  if (!top.length) { el.innerHTML = '<div class="section-title">Top Genes</div><div style="color:#94a3b8;font-size:10px;">No gene data.</div>'; return; }
+  if (!top.length) { el.innerHTML = '<div class="section-title">Top Genes</div><div class="section-body"><div style="color:#94a3b8;font-size:10px;">No gene data.</div></div>'; return; }
   const max = top[0]?.[1] || 1;
-  el.innerHTML = '<div class="section-title">Top Genes</div>' + top.slice(0, 15).map(([g, c]) =>
+  el.innerHTML = '<div class="section-title" onclick="toggleSection(this)">Top Genes</div><div class="section-body">' + top.slice(0, 15).map(([g, c]) =>
     `<div class="row clickable-row" onclick="selectGene('${esc(g)}')" style="cursor:pointer;"><span class="gene">${esc(g)}</span><span class="val">${fmt(c)} variants</span></div><div class="bar" style="width:${Math.round(c/max*100)}%"></div>`
-  ).join('');
+  ).join('') + '</div>';
 }
 
 // ── Gene Selection ─────────────────────────────────────────
@@ -65,7 +91,10 @@ window.selectGene = async function(gene) {
   history.replaceState(null, '', '?gene=' + encodeURIComponent(gene));
   $('overview-mode').style.display = 'none'; $('gene-mode').style.display = ''; $('clear-btn').style.display = '';
   renderGeneHeader(gene); renderFilterBar();
-  $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[gene]?.total || 0);
+  const geneTotal = indexCache?.gene_breakdowns?.[gene]?.total || 0;
+  const heroEl = $('hero-number');
+  if (lastHeroGene !== gene) { animateNumber(heroEl, geneTotal); lastHeroGene = gene; }
+  else heroEl.textContent = fmt(geneTotal);
   $('hero-subtitle').textContent = `${esc(gene)} variants tracked`;
   const chunkId = indexCache?.gene_to_chunk?.[gene];
   if (chunkId != null && !loadedChunks.has(chunkId)) {
@@ -73,6 +102,7 @@ window.selectGene = async function(gene) {
   }
   if (chunkId != null && loadedChunks.has(chunkId)) {
     renderGeneHeader(gene); renderVariantList();
+    renderGenomeBrowser('genome-browser', gene);
     renderDrift(gene); renderHotspots(gene); renderTimeline(gene); renderConcordance(gene); renderSurvival(gene);
   }
 };
@@ -130,7 +160,7 @@ function donutSVG(path, vus, ben, confl, total) {
   let off = 0;
   return `<svg viewBox="0 0 40 40" style="width:36px;height:36px;">${segs.map(s => {
     const len = (s.val/total)*circ, o = off; off += len;
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len} ${circ-len}" stroke-dashoffset="${-o}"/>`;
+    return `<circle class="donut-segment" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len} ${circ-len}" stroke-dashoffset="${-o}"/>`;
   }).join('')}</svg>`;
 }
 
@@ -193,8 +223,21 @@ window.setRange = function(range) {
   event.target.classList.add('active');
   if (focusGene) {
     currentFilters.date_from = range !== 'all' ? rangeToDate(range) : '';
-    $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
-    $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
+    const cid = indexCache?.gene_to_chunk?.[focusGene];
+    if (range !== 'all' && tracker && cid != null && loadedChunks.has(cid)) {
+      try {
+        const result = JSON.parse(tracker.query(JSON.stringify({ gene: focusGene, date_from: rangeToDate(range), limit: 0 })));
+        const totalAll = indexCache?.gene_breakdowns?.[focusGene]?.total || 0;
+        $('hero-number').textContent = fmt(result.filtered || 0);
+        $('hero-subtitle').textContent = `${fmt(result.filtered||0)} of ${fmt(totalAll)} ${esc(focusGene)} variants (${rangeLabel(range)})`;
+      } catch(e) {
+        $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
+        $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
+      }
+    } else {
+      $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
+      $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
+    }
     renderVariantList();
   } else renderHero();
 };
@@ -254,8 +297,8 @@ function renderDrift(gene) {
   for (let i=0;i<n;i++) { const s=snaps[i], t=(s.path||0)+(s.vus||0)+(s.ben||0), x=10+i*xStep;
     if(!t){pts.push({x,pY:h-10,vY:h-10});continue;} const aH=h-20; pts.push({x,pY:10+(1-(s.path||0)/t)*aH,vY:10+(1-(s.path||0)/t-(s.vus||0)/t)*aH}); }
   const area=(up,lo)=>up.map((v,i)=>`${pts[i].x},${v}`).join(' ')+' '+[...lo].reverse().map((v,i)=>`${pts[n-1-i].x},${v}`).join(' ');
-  const labels=`<text x="10" y="${h-1}" fill="#94a3b8" font-size="5">${snaps[0].month}</text><text x="${w/2}" y="${h-1}" text-anchor="middle" fill="#94a3b8" font-size="5">${snaps[Math.floor(n/2)].month}</text><text x="${w-10}" y="${h-1}" text-anchor="end" fill="#94a3b8" font-size="5">${snaps[n-1].month}</text>`;
-  el.innerHTML = `<div class="section-title">Classification Drift</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><polygon points="${area(pts.map(p=>10),pts.map(p=>p.vY))}" fill="#0f766e" opacity="0.6"/><polygon points="${area(pts.map(p=>p.vY),pts.map(p=>p.pY))}" fill="#d97706" opacity="0.6"/><polygon points="${area(pts.map(p=>p.pY),pts.map(()=>h-10))}" fill="#dc2626" opacity="0.6"/>${labels}<text x="${w-10}" y="8" text-anchor="end" fill="#94a3b8" font-size="5"><tspan fill="#dc2626">\u25CF</tspan> path <tspan fill="#d97706">\u25CF</tspan> VUS <tspan fill="#0f766e">\u25CF</tspan> ben</text></svg>`;
+  const labels=`<text x="10" y="${h-1}" fill="#64748b" font-size="9">${snaps[0].month}</text><text x="${w/2}" y="${h-1}" text-anchor="middle" fill="#64748b" font-size="9">${snaps[Math.floor(n/2)].month}</text><text x="${w-10}" y="${h-1}" text-anchor="end" fill="#64748b" font-size="9">${snaps[n-1].month}</text>`;
+  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Classification Drift</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><polygon points="${area(pts.map(p=>10),pts.map(p=>p.vY))}" fill="#0f766e" opacity="0.6"/><polygon points="${area(pts.map(p=>p.vY),pts.map(p=>p.pY))}" fill="#d97706" opacity="0.6"/><polygon points="${area(pts.map(p=>p.pY),pts.map(()=>h-10))}" fill="#dc2626" opacity="0.6"/>${labels}<text x="${w-10}" y="8" text-anchor="end" fill="#64748b" font-size="9"><tspan fill="#dc2626">\u25CF</tspan> path <tspan fill="#d97706">\u25CF</tspan> VUS <tspan fill="#0f766e">\u25CF</tspan> ben</text></svg></div>`;
 }
 
 function renderHotspots(gene) {
@@ -266,7 +309,7 @@ function renderHotspots(gene) {
   const minP=Math.min(...data.map(d=>d.start)), maxP=Math.max(...data.map(d=>d.end)), span=maxP-minP||1, w=400, h=40;
   const blocks = data.map(d => { const x=((d.start-minP)/span)*(w-20)+10, bw=Math.max(2,((d.end-d.start)/span)*(w-20)), pf=d.total?(d.pathogenic||0)/d.total:0;
     return `<rect x="${x}" y="8" width="${bw}" height="20" rx="2" fill="rgb(${Math.round(100+pf*155)},${Math.round(60-pf*40)},${Math.round(60-pf*40)})" opacity="0.85"><title>${d.region||''}: ${d.total} variants (${d.pathogenic||0} path.)</title></rect>`; }).join('');
-  el.innerHTML = `<div class="section-title">Hotspot Map</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><rect x="10" y="16" width="${w-20}" height="4" rx="2" fill="#e2e8f0"/>${blocks}<text x="10" y="${h-2}" fill="#94a3b8" font-size="5">${minP.toLocaleString()}</text><text x="${w-10}" y="${h-2}" text-anchor="end" fill="#94a3b8" font-size="5">${maxP.toLocaleString()}</text></svg>`;
+  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Hotspot Map</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><rect x="10" y="16" width="${w-20}" height="4" rx="2" fill="#e2e8f0"/>${blocks}<text x="10" y="${h-2}" fill="#64748b" font-size="9">${minP.toLocaleString()}</text><text x="${w-10}" y="${h-2}" text-anchor="end" fill="#64748b" font-size="9">${maxP.toLocaleString()}</text></svg></div>`;
 }
 
 function renderTimeline(gene) {
@@ -280,8 +323,8 @@ function renderTimeline(gene) {
   const maxY=Math.max(1,...cats.map(c=>c.total)), xAt=i=>pad.l+(i/Math.max(1,n-1))*pw, yAt=v=>pad.t+ph-(v/maxY)*ph;
   const ap=(up,lo)=>'M'+up.map((v,i)=>`${xAt(i)},${yAt(v)}`).join(' L')+' L'+[...lo].reverse().map((v,i)=>`${xAt(n-1-i)},${yAt(v)}`).join(' L')+' Z';
   const step=Math.max(1,Math.floor(n/5));
-  const labels=keys.filter((_,i)=>i%step===0||i===n-1).map(k=>`<text x="${xAt(keys.indexOf(k))}" y="${h-2}" text-anchor="middle" fill="#94a3b8" font-size="6">${k.slice(2,7)}</text>`).join('');
-  el.innerHTML = `<div class="section-title">Submissions Timeline</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;" preserveAspectRatio="none"><path d="${ap(cats.map(c=>c.b),cats.map(()=>0))}" fill="#16a34a" opacity="0.5"/><path d="${ap(cats.map(c=>c.b+c.v),cats.map(c=>c.b))}" fill="#eab308" opacity="0.5"/><path d="${ap(cats.map(c=>c.total),cats.map(c=>c.b+c.v))}" fill="#dc2626" opacity="0.5"/>${labels}<text x="${pad.l-3}" y="${pad.t+4}" text-anchor="end" fill="#94a3b8" font-size="6">${maxY}</text><text x="${pad.l-3}" y="${yAt(0)+1}" text-anchor="end" fill="#94a3b8" font-size="6">0</text></svg>`;
+  const labels=keys.filter((_,i)=>i%step===0||i===n-1).map(k=>`<text x="${xAt(keys.indexOf(k))}" y="${h-2}" text-anchor="middle" fill="#64748b" font-size="9">${k.slice(2,7)}</text>`).join('');
+  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">Submissions Timeline</div><div class="section-body collapsed"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;" preserveAspectRatio="none"><path d="${ap(cats.map(c=>c.b),cats.map(()=>0))}" fill="#16a34a" opacity="0.5"/><path d="${ap(cats.map(c=>c.b+c.v),cats.map(c=>c.b))}" fill="#eab308" opacity="0.5"/><path d="${ap(cats.map(c=>c.total),cats.map(c=>c.b+c.v))}" fill="#dc2626" opacity="0.5"/>${labels}<text x="${pad.l-3}" y="${pad.t+4}" text-anchor="end" fill="#64748b" font-size="9">${maxY}</text><text x="${pad.l-3}" y="${yAt(0)+1}" text-anchor="end" fill="#64748b" font-size="9">0</text></svg></div>`;
 }
 
 function renderConcordance(gene) {
@@ -291,7 +334,7 @@ function renderConcordance(gene) {
   if (!data.length) { el.innerHTML=''; return; }
   const rows = data.slice(0,20).map(r => { const s=r.discordance_score||0, bW=Math.round(s*60), red=Math.round(s*220+35), grn=Math.round((1-s)*180+40);
     return `<tr><td style="font-size:9px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.hgvs)}">${esc(r.hgvs)}</td><td><span class="badge-sm ${badgeClass(r.classification)}">${esc(r.classification)}</span></td><td style="font-size:8px;color:#64748b;">${esc(r.submitter)}</td><td><svg width="64" height="10" style="vertical-align:middle;"><rect x="0" y="1" width="${bW}" height="8" rx="2" fill="rgb(${red},${grn},60)"/><rect x="0" y="1" width="60" height="8" rx="2" fill="none" stroke="#e2e8f0" stroke-width="0.5"/></svg></td></tr>`; }).join('');
-  el.innerHTML = `<div class="section-title">Submitter Concordance</div><table style="width:100%;border-collapse:collapse;font-size:9px;"><thead><tr style="color:#94a3b8;text-align:left;"><th>Variant</th><th>Class</th><th>Submitters</th><th>Discordance</th></tr></thead><tbody>${rows}</tbody></table>`;
+  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">Submitter Concordance</div><div class="section-body collapsed"><table style="width:100%;border-collapse:collapse;font-size:9px;"><thead><tr style="color:#94a3b8;text-align:left;"><th>Variant</th><th>Class</th><th>Submitters</th><th>Discordance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderSurvival(gene) {
@@ -304,10 +347,160 @@ function renderSurvival(gene) {
   const xAt=d=>pad.l+(d/maxX)*pw, yAt=f=>pad.t+ph-f*ph;
   const line=pts.map(p=>`${xAt(p.days??p.x)},${yAt(p.fraction??p.y)}`).join(' L');
   const circles=pts.filter((_,i)=>i%Math.max(1,Math.floor(pts.length/20))===0).map(p=>{const d=p.days??p.x,f=p.fraction??p.y;return `<circle cx="${xAt(d)}" cy="${yAt(f)}" r="3" fill="#0f766e" opacity="0"><title>Day ${d}: ${(f*100).toFixed(1)}% still VUS</title></circle><circle cx="${xAt(d)}" cy="${yAt(f)}" r="8" fill="transparent"><title>Day ${d}: ${(f*100).toFixed(1)}% still VUS</title></circle>`;}).join('');
-  const xL=[0,Math.round(maxX/2),maxX].map(d=>`<text x="${xAt(d)}" y="${h-3}" text-anchor="middle" fill="#94a3b8" font-size="6">${d}d</text>`).join('');
-  const yL=[0,0.5,1].map(f=>`<text x="${pad.l-3}" y="${yAt(f)+2}" text-anchor="end" fill="#94a3b8" font-size="6">${f}</text>`).join('');
+  const xL=[0,Math.round(maxX/2),maxX].map(d=>`<text x="${xAt(d)}" y="${h-3}" text-anchor="middle" fill="#64748b" font-size="9">${d}d</text>`).join('');
+  const yL=[0,0.5,1].map(f=>`<text x="${pad.l-3}" y="${yAt(f)+2}" text-anchor="end" fill="#64748b" font-size="9">${f}</text>`).join('');
   const grid=[0.25,0.5,0.75].map(f=>`<line x1="${pad.l}" y1="${yAt(f)}" x2="${w-pad.r}" y2="${yAt(f)}" stroke="#f1f5f9" stroke-width="0.5"/>`).join('');
-  el.innerHTML = `<div class="section-title">VUS Survival Curve</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100px;">${grid}<polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="1.5"/>${circles}${xL}${yL}<text x="${w/2}" y="${h}" text-anchor="middle" fill="#94a3b8" font-size="5">days since VUS submission</text></svg>`;
+  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">VUS Survival Curve</div><div class="section-body collapsed"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100px;">${grid}<polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="1.5"/>${circles}${xL}${yL}<text x="${w/2}" y="${h}" text-anchor="middle" fill="#64748b" font-size="9">days since VUS submission</text></svg></div>`;
+}
+
+function renderGenomeBrowser(containerId, gene) {
+  const el = document.getElementById(containerId);
+  if (!el || !tracker || !focusGene) { if (el) el.innerHTML = ''; return; }
+
+  // Get all variants for this gene with positions
+  let result;
+  try {
+    result = JSON.parse(tracker.query(JSON.stringify({
+      gene: gene, limit: 5000, sort_by: 'position', sort_asc: true
+    })));
+  } catch(e) { el.innerHTML = ''; return; }
+  const variants = (result.variants || []).filter(v => v.pos > 0);
+  if (!variants.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:9px">No genomic coordinates available</div>'; return; }
+
+  // Determine genomic range
+  const minPos = variants[0].pos;
+  const maxPos = variants[variants.length - 1].pos;
+  const span = maxPos - minPos || 1;
+  const chrom = variants[0].chrom || '?';
+
+  // State for zoom/pan
+  let viewStart = minPos - span * 0.05;
+  let viewEnd = maxPos + span * 0.05;
+
+  function render() {
+    const viewSpan = viewEnd - viewStart;
+    const w = 400, h = 70;
+
+    const classColor = (c) => {
+      const s = shortClass(c);
+      if (s.includes('path')) return '#dc2626';
+      if (s === 'VUS') return '#eab308';
+      if (s.includes('ben')) return '#16a34a';
+      if (s.includes('confl')) return '#8b5cf6';
+      return '#94a3b8';
+    };
+
+    const toX = (pos) => ((pos - viewStart) / viewSpan) * w;
+
+    let variantSVG = '';
+    const visible = variants.filter(v => v.pos >= viewStart && v.pos <= viewEnd);
+
+    if (visible.length > 200) {
+      // Density heatmap mode
+      const bins = new Array(w).fill(null).map(() => ({path:0, vus:0, ben:0, total:0}));
+      for (const v of visible) {
+        const x = Math.floor(toX(v.pos));
+        if (x >= 0 && x < w) {
+          bins[x].total++;
+          const s = shortClass(v.classification);
+          if (s.includes('path')) bins[x].path++;
+          else if (s === 'VUS') bins[x].vus++;
+          else bins[x].ben++;
+        }
+      }
+      for (let x = 0; x < w; x++) {
+        if (bins[x].total === 0) continue;
+        const intensity = Math.min(bins[x].total / 5, 1);
+        const mainColor = bins[x].path > bins[x].vus ? '#dc2626' : bins[x].vus > bins[x].ben ? '#eab308' : '#16a34a';
+        variantSVG += `<rect x="${x}" y="${20}" width="1" height="${30 * intensity + 5}" fill="${mainColor}" opacity="${0.3 + intensity * 0.7}"><title>${bins[x].total} variants at chr${chrom}:${Math.round(viewStart + (x/w)*viewSpan)}</title></rect>`;
+      }
+    } else {
+      // Lollipop mode
+      for (const v of visible) {
+        const x = toX(v.pos).toFixed(1);
+        const color = classColor(v.classification);
+        const sc = shortClass(v.classification);
+        variantSVG += `<line x1="${x}" y1="50" x2="${x}" y2="25" stroke="${color}" stroke-width="1" opacity="0.6"/>`;
+        variantSVG += `<circle cx="${x}" cy="22" r="3" fill="${color}" opacity="0.8"><title>${v.gene} ${v.hgvs} (${sc})\nchr${chrom}:${v.pos}</title></circle>`;
+      }
+    }
+
+    // Axis ticks
+    const ticks = 5;
+    let axisSVG = '';
+    for (let i = 0; i <= ticks; i++) {
+      const pos = viewStart + (viewSpan * i / ticks);
+      const x = (i / ticks) * w;
+      const label = pos >= 1e6 ? (pos/1e6).toFixed(2) + 'M' : pos >= 1e3 ? (pos/1e3).toFixed(0) + 'K' : pos.toFixed(0);
+      axisSVG += `<line x1="${x}" y1="55" x2="${x}" y2="58" stroke="#cbd5e1" stroke-width="0.5"/>`;
+      axisSVG += `<text x="${x}" y="66" text-anchor="middle" fill="#64748b" font-size="7">${label}</text>`;
+    }
+
+    // Navigation controls
+    const controls = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+        <span style="font-size:8px;color:#64748b;">chr${chrom}:${Math.round(viewStart)}\u2013${Math.round(viewEnd)} (${visible.length} variants)</span>
+        <span style="display:flex;gap:2px;">
+          <button onclick="browserZoom(0.5)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">+</button>
+          <button onclick="browserZoom(2)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2212</button>
+          <button onclick="browserPan(-0.3)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2190</button>
+          <button onclick="browserPan(0.3)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2192</button>
+          <button onclick="browserReset()" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u27F2</button>
+        </span>
+      </div>
+    `;
+
+    // Gene track bar
+    const geneBar = `<rect x="0" y="12" width="${w}" height="4" rx="2" fill="#e2e8f0"/>
+      <rect x="${toX(minPos)}" y="12" width="${Math.max(toX(maxPos) - toX(minPos), 2)}" height="4" rx="2" fill="#0f766e" opacity="0.3"/>
+      <text x="${toX(minPos)}" y="9" fill="#0f766e" font-size="8" font-weight="600">${gene}</text>`;
+
+    el.innerHTML = controls + `
+      <svg viewBox="0 0 ${w} 70" style="width:100%;height:70px;">
+        ${geneBar}
+        ${variantSVG}
+        <line x1="0" y1="55" x2="${w}" y2="55" stroke="#e2e8f0" stroke-width="0.5"/>
+        ${axisSVG}
+      </svg>
+    `;
+  }
+
+  // Zoom/Pan controls
+  window.browserZoom = function(factor) {
+    const center = (viewStart + viewEnd) / 2;
+    const halfSpan = ((viewEnd - viewStart) / 2) * factor;
+    viewStart = center - halfSpan;
+    viewEnd = center + halfSpan;
+    render();
+  };
+
+  window.browserPan = function(fraction) {
+    const shift = (viewEnd - viewStart) * fraction;
+    viewStart += shift;
+    viewEnd += shift;
+    render();
+  };
+
+  window.browserReset = function() {
+    viewStart = minPos - span * 0.05;
+    viewEnd = maxPos + span * 0.05;
+    render();
+  };
+
+  // Mouse wheel zoom
+  el.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 1.3 : 0.7;
+    const rect = el.querySelector('svg')?.getBoundingClientRect();
+    if (!rect) return;
+    const mouseX = (e.clientX - rect.left) / rect.width;
+    const mousePos = viewStart + mouseX * (viewEnd - viewStart);
+    viewStart = mousePos - (mousePos - viewStart) * factor;
+    viewEnd = mousePos + (viewEnd - mousePos) * factor;
+    render();
+  }, { passive: false });
+
+  render();
 }
 
 function renderIdeogram() {
@@ -320,9 +513,56 @@ function renderIdeogram() {
     let p=`<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" rx="3" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="0.5"/>`;
     for (const pos of Object.keys(cb).map(Number).sort((a,b)=>a-b)) { const c=cb[pos],f=c/maxCount,by=y0+(pos/(cL[chr]*1e6||1))*chrH,bh=Math.max(1,(1/(cL[chr]||1))*chrH);
       p+=`<rect x="${x}" y="${by}" width="${barW}" height="${bh}" fill="rgb(${15-Math.round(f*15)},${118-Math.round(f*48)},${110-Math.round(f*40)})" opacity="${0.3+f*0.7}"><title>${chr}:${pos} \u2014 ${c} variants</title></rect>`; }
-    return p+`<text x="${x+barW/2}" y="${h-4}" text-anchor="middle" fill="#64748b" font-size="5">${chr.replace('chr','')}</text>`; }).join('');
-  el.innerHTML = `<div class="section-title">Chromosome Ideogram</div><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">${elems}</svg>`;
+    return p+`<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" fill="transparent" style="cursor:pointer;" onclick="zoomChromosome('${chr}')"/><text x="${x+barW/2}" y="${h-4}" text-anchor="middle" fill="#64748b" font-size="9" style="cursor:pointer;" onclick="zoomChromosome('${chr}')">${chr.replace('chr','')}</text>`; }).join('');
+  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Chromosome Ideogram</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;cursor:pointer;" preserveAspectRatio="xMinYMin meet">${elems}</svg><div id="ideogram-zoom" style="display:none;margin-top:4px;"></div></div>`;
 }
+
+window.zoomChromosome = function(chr) {
+  const el = document.getElementById('ideogram-zoom');
+  if (!el || !indexCache?.chromosome_bins) return;
+  const cb = indexCache.chromosome_bins[chr];
+  if (!cb || !Object.keys(cb).length) { el.style.display='none'; return; }
+
+  // If already showing this chromosome, toggle off
+  if (el.dataset.chr === chr) { el.style.display='none'; el.dataset.chr=''; return; }
+  el.dataset.chr = chr;
+  el.style.display = 'block';
+
+  const cL={chr1:248,chr2:242,chr3:198,chr4:190,chr5:181,chr6:170,chr7:159,chr8:145,chr9:138,chr10:133,chr11:135,chr12:133,chr13:114,chr14:107,chr15:101,chr16:90,chr17:83,chr18:80,chr19:58,chr20:64,chr21:46,chr22:50,chrX:156,chrY:57};
+  const chrLen = (cL[chr] || 100) * 1e6;
+  const positions = Object.keys(cb).map(Number).sort((a,b) => a - b);
+  const w = 400, h = 50, pad = 10;
+
+  let maxCount = 1;
+  for (const p of positions) { if (cb[p] > maxCount) maxCount = cb[p]; }
+
+  // Draw expanded chromosome with density bars
+  const toX = (pos) => pad + ((pos / chrLen) * (w - 2 * pad));
+  let bars = '';
+  for (const pos of positions) {
+    const x = toX(pos);
+    const count = cb[pos];
+    const f = count / maxCount;
+    const barH = 4 + f * 26;
+    bars += `<rect x="${x - 1}" y="${30 - barH}" width="3" height="${barH}" rx="1" fill="rgb(${15 + Math.round(f * 200)},${118 - Math.round(f * 80)},${110 - Math.round(f * 70)})" opacity="${0.4 + f * 0.6}"><title>${chr}:${pos.toLocaleString()} \u2014 ${count} variants</title></rect>`;
+  }
+
+  // Axis labels
+  const axisLabels = [0, 0.25, 0.5, 0.75, 1].map(frac => {
+    const pos = Math.round(chrLen * frac);
+    const x = pad + frac * (w - 2 * pad);
+    const label = pos >= 1e6 ? (pos/1e6).toFixed(0) + 'M' : (pos/1e3).toFixed(0) + 'K';
+    return `<text x="${x}" y="${h - 2}" text-anchor="middle" fill="#64748b" font-size="8">${label}</text>`;
+  }).join('');
+
+  el.innerHTML = `<div style="font-size:9px;color:#0f766e;font-weight:600;margin-bottom:2px;">${chr} expanded <span style="color:#94a3b8;font-weight:normal;cursor:pointer;" onclick="document.getElementById('ideogram-zoom').style.display='none';document.getElementById('ideogram-zoom').dataset.chr='';">\u2715</span></div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
+      <rect x="${pad}" y="28" width="${w - 2*pad}" height="4" rx="2" fill="#e2e8f0"/>
+      ${bars}
+      <line x1="${pad}" y1="35" x2="${w - pad}" y2="35" stroke="#e2e8f0" stroke-width="0.5"/>
+      ${axisLabels}
+    </svg>`;
+};
 
 // ── Report Date ────────────────────────────────────────────
 function onReportDate(e) {
