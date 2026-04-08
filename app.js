@@ -96,22 +96,21 @@ window.selectGene = async function(gene) {
   if (lastHeroGene !== gene) { animateNumber(heroEl, geneTotal); lastHeroGene = gene; }
   else heroEl.textContent = fmt(geneTotal);
   $('hero-subtitle').textContent = `${esc(gene)} variants tracked`;
-  // Show placeholder sections immediately (before chunk loads)
-  $('variant-list').innerHTML = '<div style="color:#94a3b8;font-size:10px;padding:8px;">Loading variant data...</div>';
-  ['browser-section','drift-section','hotspot-section','timeline-section','concordance-section','survival-section'].forEach(id => {
-    const el = $(id);
-    if (el) el.innerHTML = '<div class="section-title">Loading...</div><div style="color:#94a3b8;font-size:9px;padding:4px 0;">Downloading gene data (~60 MB)...</div>';
-  });
+  // Render static visualizations IMMEDIATELY from index.json (no chunk needed)
+  renderStaticClassificationBar(gene);
+  renderIdeogram('ideogram-section');
 
-  // Load chunk (60 MB, takes 10-30s)
+  // Load chunk in background — variant list + genome browser need it
   const chunkId = indexCache?.gene_to_chunk?.[gene];
+  $('variant-list').innerHTML = `<div style="color:#0f766e;font-size:10px;padding:8px;text-align:center;" class="loading-text">Loading ${gene} variant data...</div>`;
+
   if (chunkId != null && !loadedChunks.has(chunkId)) {
-    showLoading(`loading ${gene} data (${chunkId + 1}/22)...`);
+    showLoading(`loading ${gene} variants...`);
     await loadChunk(chunkId);
     hideLoading();
   }
 
-  // Render everything after chunk load
+  // After chunk: render live-computed sections
   if (chunkId != null && loadedChunks.has(chunkId)) {
     renderGeneHeader(gene);
     renderVariantList();
@@ -122,10 +121,40 @@ window.selectGene = async function(gene) {
     renderConcordance(gene);
     renderSurvival(gene);
   } else {
-    // Chunk failed — show what we can from index.json
-    $('variant-list').innerHTML = '<div style="color:#dc2626;font-size:10px;padding:8px;">Could not load variant data. Try refreshing.</div>';
+    $('variant-list').innerHTML = '<div style="color:#94a3b8;font-size:10px;padding:8px;">Variant data not yet loaded. Large download required (~60 MB).</div>';
   }
 };
+
+// Render classification bar chart from index.json (instant, no chunk needed)
+function renderStaticClassificationBar(gene) {
+  const bd = indexCache?.gene_breakdowns?.[gene];
+  if (!bd) return;
+  const total = bd.total || 1;
+  const sections = [
+    { label: 'Path', count: bd.pathogenic, color: '#dc2626' },
+    { label: 'LP', count: bd.likely_pathogenic, color: '#f59e0b' },
+    { label: 'VUS', count: bd.vus, color: '#eab308' },
+    { label: 'LB', count: bd.likely_benign, color: '#22c55e' },
+    { label: 'Ben', count: bd.benign, color: '#16a34a' },
+    { label: 'Confl', count: bd.conflicting, color: '#8b5cf6' },
+  ].filter(s => s.count > 0);
+
+  let x = 0;
+  const barSVG = sections.map(s => {
+    const w = (s.count / total) * 380;
+    const rect = `<rect x="${x + 10}" y="2" width="${Math.max(w, 1)}" height="16" rx="2" fill="${s.color}" opacity="0.85"><title>${s.label}: ${fmt(s.count)} (${(s.count/total*100).toFixed(1)}%)</title></rect>`;
+    const lbl = w > 25 ? `<text x="${x + 10 + w/2}" y="13" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">${s.label}</text>` : '';
+    x += w;
+    return rect + lbl;
+  }).join('');
+
+  const el = $('drift-section');
+  if (el) el.innerHTML = `
+    <div class="section-title">Classification Distribution</div>
+    <svg viewBox="0 0 400 22" style="width:100%;height:22px;">${barSVG}</svg>
+    <div style="font-size:8px;color:#94a3b8;margin-top:2px;">Detailed charts load with variant data</div>
+  `;
+}
 
 window.clearGene = function() {
   focusGene = ''; currentFilters.gene = ''; $('search').value = '';
