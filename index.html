@@ -20,96 +20,52 @@
         <input type="text" id="search" placeholder="Search gene/variant..." autocomplete="off">
         <div class="autocomplete" id="autocomplete"></div>
       </div>
-      <input type="date" id="report-date" title="Report date -- what changed since?">
+      <input type="date" id="report-date" title="What changed since?">
+      <button class="clear-btn" id="clear-btn" onclick="clearGene()" style="display:none">&#x2715;</button>
     </div>
   </div>
 
   <!-- Hero -->
   <div class="hero">
-    <div class="big-number" id="total-variants">---</div>
-    <div class="subtitle">
-      <span id="delta">loading...</span> ·
-      <span id="trend"></span>
-    </div>
+    <div class="big-number" id="hero-number">&mdash;</div>
+    <div class="subtitle" id="hero-subtitle">loading...</div>
   </div>
 
   <!-- Time Range -->
   <div class="time-bar">
-    <button class="tb active" onclick="setRange('7d')">7d</button>
+    <button class="tb" onclick="setRange('7d')">7d</button>
     <button class="tb" onclick="setRange('1m')">1m</button>
     <button class="tb" onclick="setRange('1y')">1y</button>
     <button class="tb" onclick="setRange('5y')">5y</button>
-    <button class="tb" onclick="setRange('all')">All</button>
+    <button class="tb active" onclick="setRange('all')">All</button>
   </div>
 
-  <!-- Gene Focus -->
-  <div class="gene-focus" id="gene-focus">
-    <div class="focus-header">
-      <span class="focus-gene-name" id="focus-gene-name">LDLR</span>
-      <span class="focus-source" id="focus-source"></span>
+  <!-- Overview Mode (visible when no gene selected) -->
+  <div id="overview-mode">
+    <div class="section" id="top-genes-section"></div>
+    <div class="section" id="ideogram-section"></div>
+  </div>
+
+  <!-- Gene Dashboard (visible when gene selected) -->
+  <div id="gene-mode" style="display:none">
+    <div class="gene-header" id="gene-header"></div>
+    <div class="filter-bar" id="filter-bar"></div>
+    <div class="loading" id="loading" style="display:none">
+      <span class="loading-text" id="loading-text">loading...</span>
     </div>
-    <div id="focus-stats" class="focus-row"></div>
-    <div id="focus-donut" class="focus-donut"></div>
-    <div id="focus-donut-detail" style="margin-top:4px;"></div>
-  </div>
-
-  <!-- Filters -->
-  <div class="filter-bar" id="filter-bar">
-    <div class="filter-chips" id="filter-chips">
-      <button class="filter-chip active" data-class="0" onclick="toggleClass(0)">Path</button>
-      <button class="filter-chip active" data-class="1" onclick="toggleClass(1)">LP</button>
-      <button class="filter-chip active" data-class="2" onclick="toggleClass(2)">VUS</button>
-      <button class="filter-chip active" data-class="3" onclick="toggleClass(3)">LB</button>
-      <button class="filter-chip active" data-class="4" onclick="toggleClass(4)">Ben</button>
-      <button class="filter-chip active" data-class="5" onclick="toggleClass(5)">Confl</button>
-    </div>
-    <div class="sort-controls">
-      <button class="sort-btn" onclick="setSort('date')">Date</button>
-      <button class="sort-btn" onclick="setSort('classification')">Class</button>
-      <button class="sort-btn" onclick="setSort('hgvs')">HGVS</button>
-      <button class="sort-btn" onclick="setSort('gene')">Gene</button>
-    </div>
-  </div>
-
-  <!-- Loading indicator -->
-  <div class="loading" id="loading" style="display:none;">
-    <span class="loading-text" id="loading-text">loading...</span>
-  </div>
-
-  <!-- Expandable detail section -->
-  <div class="detail-section" id="detail-section">
-    <!-- Variant list (scrollable, shown when gene loaded) -->
     <div class="variant-list" id="variant-list"></div>
-
-    <!-- Tabs -->
-    <div class="tabs">
-      <button class="tab active" onclick="showTab(0)">Genes</button>
-      <button class="tab" onclick="showTab(1)">Changes</button>
-      <button class="tab" onclick="showTab(2)">Stats</button>
-      <button class="tab" onclick="showTab(3)">VCF</button>
-    </div>
-
-    <div class="tab-content active" id="tab0">
-      <div id="gene-list" class="list"></div>
-    </div>
-
-    <div class="tab-content" id="tab1">
-      <div id="changes-list" class="list"></div>
-    </div>
-
-    <div class="tab-content" id="tab2">
-      <div id="stats-list" class="list"></div>
-      <div id="ideogram-view" style="margin-top:10px;"></div>
-      <div id="hotspot-view" style="margin-top:10px;"></div>
-    </div>
-
-    <div class="tab-content" id="tab3">
+    <div class="section" id="drift-section"></div>
+    <div class="section" id="hotspot-section"></div>
+    <div class="section" id="timeline-section"></div>
+    <div class="section" id="concordance-section"></div>
+    <div class="section" id="survival-section"></div>
+    <div class="vcf-section" id="vcf-section">
       <div class="vcf-drop" id="vcf-drop">
         <div class="vcf-icon">VCF</div>
-        <div>Drop VCF here or <label for="vcf-input" class="vcf-link">browse</label></div>
+        <div>Drop VCF or <label for="vcf-input" class="vcf-link">browse</label></div>
         <input type="file" id="vcf-input" accept=".vcf,.vcf.gz" style="display:none">
       </div>
-      <div id="vcf-results" class="list" style="display:none;"></div>
+      <div id="vcf-results" style="display:none"></div>
     </div>
   </div>
 
@@ -117,20 +73,18 @@
   <div class="footer">
     <div class="footer-actions">
       <select id="export-what" class="export-select">
-        <option value="focus">Current gene</option>
-        <option value="changes">Classification changes</option>
-        <option value="top">Top 50 genes</option>
-        <option value="all">All gene breakdowns</option>
+        <option value="focus">Gene</option>
+        <option value="changes">Changes</option>
+        <option value="top">Top 50</option>
+        <option value="all">All genes</option>
       </select>
       <button class="export-btn" onclick="doExport('csv')">CSV</button>
       <button class="export-btn" onclick="doExport('tsv')">TSV</button>
-      <button class="export-btn" onclick="doExport('xls')">Excel</button>
+      <button class="export-btn" onclick="doExport('xls')">XLS</button>
       <button class="export-btn" onclick="shareLink()">Share</button>
     </div>
-    <div class="disclaimer">
-      Research use only. Data: <a href="https://www.ncbi.nlm.nih.gov/clinvar/">ClinVar</a>.
-    </div>
-    <span>nano-zyrkel · <a href="https://zyrkel.com">zyrkel.com</a></span>
+    <div class="disclaimer">Research use only &middot; <a href="https://www.ncbi.nlm.nih.gov/clinvar/">ClinVar</a></div>
+    <div>nano-zyrkel &middot; <a href="https://zyrkel.com">zyrkel.com</a></div>
   </div>
 </div>
 
