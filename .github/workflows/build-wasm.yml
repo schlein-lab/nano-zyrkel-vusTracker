@@ -2,7 +2,7 @@ name: Build WASM + Deploy Pages
 
 on:
   push:
-    paths: ['src/**', 'web/**', 'Cargo.toml']
+    paths: ['src/**', 'web/**', 'Cargo.toml', '.github/workflows/**']
   workflow_dispatch:
 
 permissions:
