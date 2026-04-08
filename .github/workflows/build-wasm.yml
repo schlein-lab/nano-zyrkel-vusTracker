@@ -48,6 +48,7 @@ jobs:
           cp staging/clinvar-tracker/reclassifications.jsonl pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/story.txt pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/daily_stats.jsonl pages/data/ 2>/dev/null || true
+          cp staging/clinvar-tracker/feed.xml pages/ 2>/dev/null || true
 
           # Filter out CNVs and multi-gene entries (contain semicolons or "subset of")
           if [ -f staging/clinvar-tracker/variants.jsonl ]; then
