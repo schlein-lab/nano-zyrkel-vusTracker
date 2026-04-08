@@ -33,6 +33,7 @@ pub fn process_new_variants(
                         submitter: new_var.submitter.clone(),
                     };
 
+                    #[cfg(feature = "native")]
                     tracing::info!(
                         "[tracker] Reclassification: {} {} → {} ({})",
                         new_var.gene, old.classification.short(), new_var.classification.short(), new_var.hgvs
