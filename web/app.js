@@ -69,6 +69,7 @@ async function init() {
     // Events
     document.getElementById('search').addEventListener('input', onSearch);
     document.getElementById('panel-select').addEventListener('change', onPanelChange);
+    document.getElementById('report-date').addEventListener('change', onReportDate);
     setupVCFDrop();
 
     // URL parameter: ?gene=XXX → focus that gene
@@ -253,6 +254,39 @@ function onSearch(e) {
     renderGeneFocus(upper);
     history.replaceState(null, '', '?gene=' + encodeURIComponent(upper));
   }
+}
+
+function onReportDate(e) {
+  const date = e.target.value; // YYYY-MM-DD
+  if (!date || !tracker) return;
+  const gene = document.getElementById('search').value.trim().toUpperCase() || '';
+  const result = JSON.parse(tracker.changes_since(gene, date));
+  const el = document.getElementById('reclass-list');
+  const geneLabel = gene || 'all genes';
+
+  if (result.total === 0) {
+    el.innerHTML = `<div style="color:#16a34a;font-size:11px;padding:8px 0;">
+      No classification changes for ${esc(geneLabel)} since ${esc(date)}.
+      Your report findings are still current.
+    </div>`;
+  } else {
+    el.innerHTML = `<div style="color:#dc2626;font-size:11px;padding:4px 0;font-weight:600;">
+      ${result.total} classification change${result.total > 1 ? 's' : ''} for ${esc(geneLabel)} since ${esc(date)}:
+    </div>`;
+    (result.changes || []).forEach(c => {
+      const arrow = `${shortClass(c.old)} → ${shortClass(c.new)}`;
+      el.innerHTML += `
+        <div class="row">
+          <span class="gene">${esc(c.gene)}</span>
+          <span class="hgvs">${esc((c.hgvs||'').substring(0, 30))}</span>
+          <span class="val">${arrow} (${esc(c.detected_at)})</span>
+        </div>`;
+    });
+    el.innerHTML += `<div style="color:#94a3b8;font-size:9px;margin-top:6px;">
+      These are computational observations. Verify with the original ClinVar record and a qualified geneticist.
+    </div>`;
+  }
+  showTab(0);
 }
 
 function onPanelChange(e) {

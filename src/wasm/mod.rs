@@ -79,6 +79,25 @@ impl VusTracker {
         self.reclassifications.len()
     }
 
+    /// "What changed since my report?" — find classification changes for a gene since a date.
+    /// Input: gene name, ISO date (YYYY-MM-DD). Returns JSON array of changes.
+    pub fn changes_since(&self, gene: &str, since_date: &str) -> String {
+        let upper = gene.to_uppercase();
+        let results: Vec<&ReclassificationEvent> = self.reclassifications.iter()
+            .filter(|r| {
+                (upper.is_empty() || r.gene.to_uppercase() == upper)
+                && r.detected_at >= since_date
+            })
+            .collect();
+
+        serde_json::json!({
+            "gene": gene,
+            "since": since_date,
+            "total": results.len(),
+            "changes": results.iter().take(50).collect::<Vec<_>>(),
+        }).to_string()
+    }
+
     /// Search by gene name. Returns JSON with total count + paginated sample.
     pub fn search_gene(&self, gene: &str) -> String {
         let upper = gene.to_uppercase();

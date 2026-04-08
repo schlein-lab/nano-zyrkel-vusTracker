@@ -8,8 +8,12 @@ body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:#fa
 .header h1 { font-size:12px; font-weight:600; letter-spacing:.02em; }
 .badge { font-size:8px; padding:1px 5px; border-radius:3px; text-transform:uppercase; letter-spacing:.1em; }
 .badge.live { background:rgba(255,255,255,.2); color:#fff; }
-.header input { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.2); border-radius:5px; padding:3px 8px; color:#fff; font-size:10px; outline:none; width:120px; }
+.header-right { display:flex; gap:4px; }
+.header input { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.2); border-radius:5px; padding:3px 6px; color:#fff; font-size:10px; outline:none; }
+.header input[type=text] { width:90px; }
+.header input[type=date] { width:105px; font-size:9px; }
 .header input::placeholder { color:rgba(255,255,255,.5); }
+.header input::-webkit-calendar-picker-indicator { filter:invert(1); }
 
 /* Hero */
 .hero { padding:12px 14px 4px; }
