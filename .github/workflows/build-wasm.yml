@@ -50,40 +50,25 @@ jobs:
           cp staging/clinvar-tracker/daily_stats.jsonl pages/data/ 2>/dev/null || true
           cp staging/clinvar-tracker/feed.xml pages/ 2>/dev/null || true
 
-          # Filter out CNVs and multi-gene entries (contain semicolons or "subset of")
-          if [ -f staging/clinvar-tracker/variants.jsonl ]; then
-            echo "Filtering CNVs and multi-gene entries..."
+          # Generate chunks from variants.jsonl (only if real file, not LFS pointer)
+          if [ -f staging/clinvar-tracker/variants.jsonl ] && head -1 staging/clinvar-tracker/variants.jsonl | grep -q '"gene"'; then
+            echo "Real variants.jsonl found — generating chunks..."
             grep -v '"gene":"subset of' staging/clinvar-tracker/variants.jsonl \
               | grep -v '"gene":"[^"]*;' \
               > /tmp/variants_clean.jsonl
             CLEAN=$(wc -l < /tmp/variants_clean.jsonl)
-            echo "Clean single-gene variants: $CLEAN"
-
-            # Sort by gene name (alphabetically) for balanced chunking
-            echo "Sorting by gene name..."
-            python3 -c "import json; lines=open('/tmp/variants_clean.jsonl').readlines(); lines.sort(key=lambda l: json.loads(l).get('gene','')); open('/tmp/variants_sorted_by_gene.jsonl','w').writelines(lines)"
-            TOTAL=$(wc -l < /tmp/variants_sorted_by_gene.jsonl)
-            echo "Total sorted variants: $TOTAL"
-
-            # Split into chunks of ~200,000 lines each
-            CHUNK_SIZE=200000
-            split -l $CHUNK_SIZE -d -a 2 /tmp/variants_sorted_by_gene.jsonl /tmp/chunk_
+            echo "Clean variants: $CLEAN"
+            python3 -c "import json; lines=open('/tmp/variants_clean.jsonl').readlines(); lines.sort(key=lambda l: json.loads(l).get('gene','')); open('/tmp/variants_sorted.jsonl','w').writelines(lines)"
+            split -l 200000 -d -a 2 /tmp/variants_sorted.jsonl /tmp/chunk_
             IDX=0
             for PART in /tmp/chunk_*; do
-              DEST=$(printf "pages/data/chunks/chunk_%02d.jsonl" $IDX)
-              mv "$PART" "$DEST"
+              mv "$PART" "$(printf 'pages/data/chunks/chunk_%02d.jsonl' $IDX)"
               IDX=$((IDX + 1))
             done
-            echo "Created $IDX chunk(s) of up to $CHUNK_SIZE lines each"
-
-            # Log chunk sizes
-            echo "Chunk sizes:"
-            for F in pages/data/chunks/chunk_*.jsonl; do
-              echo "  $(basename $F): $(wc -l < $F) lines, $(du -sh $F | cut -f1)"
-            done
+            echo "Created $IDX chunks"
+          else
+            echo "No real variants.jsonl — skipping chunks (existing data on gh-pages preserved)"
           fi
-
-          echo "Pages data sizes:" && du -sh pages/data/* pages/data/chunks/* 2>/dev/null || true
 
       - name: Deploy to gh-pages branch
         run: |
