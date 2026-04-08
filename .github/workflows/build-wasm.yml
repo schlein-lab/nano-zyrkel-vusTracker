@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true  # Chunks stored in LFS (schlein-lab account)
+          lfs: false  # Chunks deployed separately to gh-pages (LFS budget constraint)
 
       - name: Install Rust + WASM target
         uses: dtolnay/rust-toolchain@stable
