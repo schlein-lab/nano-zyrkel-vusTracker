@@ -75,5 +75,10 @@ pub fn parse_esummary_entry(entry: &serde_json::Value, today: &str) -> Option<Cl
         last_evaluated,
         condition,
         first_seen: today.to_string(),
+        chrom: String::new(),
+        pos: 0,
+        ref_allele: String::new(),
+        alt_allele: String::new(),
+        phenotype_ids: String::new(),
     })
 }
