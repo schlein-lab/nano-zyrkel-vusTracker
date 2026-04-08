@@ -2,7 +2,7 @@ name: Build WASM + Deploy Pages
 
 on:
   push:
-    paths: ['src/**', 'web/**', 'Cargo.toml', '.github/workflows/**']
+    paths: ['src/**', 'Cargo.toml']  # Only rebuild WASM when Rust code changes
   workflow_dispatch:
 
 permissions:
