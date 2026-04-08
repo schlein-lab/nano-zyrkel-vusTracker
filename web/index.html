@@ -91,13 +91,26 @@
     <div id="vcf-results" class="list" style="display:none;"></div>
   </div>
 
+  <!-- LDLR Showcase -->
+  <div class="ldlr-showcase" id="ldlr-showcase">
+    <div class="section-title">LDLR Focus — Familial Hypercholesterolemia</div>
+    <div id="ldlr-stats" class="list"></div>
+  </div>
+
+  <!-- Medical Disclaimer -->
+  <div class="disclaimer">
+    <strong>Research use only.</strong> This tool is NOT a diagnostic device. Clinical decisions must not be based solely on these results.
+    Always consult a qualified medical geneticist. Data: <a href="https://www.ncbi.nlm.nih.gov/clinvar/" style="color:#94a3b8">NCBI ClinVar</a> (public domain).
+  </div>
+
   <!-- Footer -->
   <div class="footer">
     <span>nano-zyrkel · autonomous agent · <a href="https://zyrkel.com">zyrkel.com</a></span>
-    <span class="privacy">Your data never leaves this browser.</span>
+    <span class="privacy">Your genomic data never leaves this browser. All computation is local.</span>
   </div>
 </div>
 
 <script type="module" src="app.js"></script>
+<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
 </body>
 </html>

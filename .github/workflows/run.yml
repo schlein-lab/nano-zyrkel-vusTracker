@@ -41,6 +41,39 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: ./target/release/vus-tracker --config hats/config.json --lang en --verbose
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install + auth Codex CLI
+        env:
+          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
+        run: |
+          npm install -g @openai/codex
+          mkdir -p ~/.codex
+          echo "$CODEX_AUTH" > ~/.codex/auth.json
+
+      - name: Generate Story of the Day
+        run: |
+          RECLASS_FILE="staging/clinvar-tracker/reclassifications.jsonl"
+          STORY_FILE="staging/clinvar-tracker/story.txt"
+          if [ -s "$RECLASS_FILE" ]; then
+            LAST=$(tail -1 "$RECLASS_FILE")
+            GENE=$(echo "$LAST" | jq -r '.gene // empty')
+            HGVS=$(echo "$LAST" | jq -r '.hgvs // empty' | head -c 50)
+            OLD=$(echo "$LAST" | jq -r '.old // empty')
+            NEW=$(echo "$LAST" | jq -r '.new // empty')
+            if [ -n "$GENE" ] && [ -n "$HGVS" ]; then
+              codex exec --skip-git-repo-check --ephemeral \
+                -o "$STORY_FILE" \
+                "Write a 3-sentence historical note about the ClinVar reclassification of $HGVS in gene $GENE from $OLD to $NEW. Include: what disease this gene is associated with, and the clinical impact of this reclassification. Be factual. English only. No markdown."
+              echo "Story generated for $GENE"
+            fi
+          else
+            echo "No reclassifications yet — skipping story"
+          fi
+
       - name: Commit results
         run: |
           git config user.name "nano-zyrkel"

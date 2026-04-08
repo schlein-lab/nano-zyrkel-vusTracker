@@ -40,7 +40,7 @@ jobs:
       - name: Prepare GitHub Pages
         run: |
           mkdir -p pages/pkg pages/data
-          cp web/index.html web/app.js web/style.css pages/
+          cp web/index.html web/app.js web/style.css web/sw.js pages/
           cp web/pkg/vus_tracker_lib_bg.wasm pages/pkg/
           cp web/pkg/vus_tracker_lib.js pages/pkg/
           # Copy small data files for the browser
