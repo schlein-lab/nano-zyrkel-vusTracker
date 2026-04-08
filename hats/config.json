@@ -16,7 +16,7 @@
   "output_dir": "staging",
   "lang": "en",
   "clinvar": {
-    "max_variants_per_run": 100,
+    "max_variants_per_run": 500,
     "request_delay_ms": 350,
     "notify_reclassifications": true,
     "notify_new_pathogenic": true,
