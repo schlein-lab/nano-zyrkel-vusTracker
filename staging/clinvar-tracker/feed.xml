@@ -1,0 +1,359 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+<title>nano-zyrkel-vusTracker — Classification Changes</title>
+<link>https://schlein-lab.github.io/nano-zyrkel-vusTracker/</link>
+<description>ClinVar variant classification changes detected by nano-zyrkel</description>
+<language>en</language>
+<lastBuildDate>Wed, 8 Apr 2026 19:35:43 +0000</lastBuildDate>
+<item>
+  <title>ALDH2 other → other</title>
+  <description>NM_000690.4(ALDH2):c.1510G&gt;A (p.Glu504Lys) in gene ALDH2 changed from drug response to not provided (OMIM)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/18390/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/18390/</guid>
+  <pubDate>2026-03-30</pubDate>
+</item>
+<item>
+  <title>MYBPC3 path. → l.path.</title>
+  <description>NM_000256.3(MYBPC3):c.26-2A&gt;G in gene MYBPC3 changed from pathogenic to likely pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/42644/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/42644/</guid>
+  <pubDate>2026-02-25</pubDate>
+</item>
+<item>
+  <title>CAPN3 l.path. → path.</title>
+  <description>NM_000070.3(CAPN3):c.550del (p.Thr184fs) in gene CAPN3 changed from likely pathogenic to pathogenic (Genetic Diseases Diagnostic Center, Koc University Hospital)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/17621/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/17621/</guid>
+  <pubDate>2026-02-20</pubDate>
+</item>
+<item>
+  <title>TTN l.path. → path.</title>
+  <description>NM_001267550.2(TTN):c.97114dup (p.Arg32372fs) in gene TTN changed from likely pathogenic to pathogenic (Labcorp Genetics (formerly Invitae), Labcorp)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/418768/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/418768/</guid>
+  <pubDate>2026-01-18</pubDate>
+</item>
+<item>
+  <title>TTN l.path. → path.</title>
+  <description>NM_001267550.2(TTN):c.94182_94183insAGCAGCT (p.Leu31395fs) in gene TTN changed from likely pathogenic to pathogenic (Labcorp Genetics (formerly Invitae), Labcorp)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/466668/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/466668/</guid>
+  <pubDate>2026-01-16</pubDate>
+</item>
+<item>
+  <title>ADAR VUS → path.</title>
+  <description>NM_001111.5(ADAR):c.577C&gt;G (p.Pro193Ala) in gene ADAR changed from VUS to pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/126395/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/126395/</guid>
+  <pubDate>2026-01-15</pubDate>
+</item>
+<item>
+  <title>TTN l.path. → path.</title>
+  <description>NM_001267550.2(TTN):c.72828_72831dup (p.Thr24278fs) in gene TTN changed from likely pathogenic to pathogenic (Labcorp Genetics (formerly Invitae), Labcorp)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/405079/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/405079/</guid>
+  <pubDate>2025-12-22</pubDate>
+</item>
+<item>
+  <title>RNF170 VUS → l.path.</title>
+  <description>NM_030954.4(RNF170):c.304T&gt;C (p.Cys102Arg) in gene RNF170 changed from VUS to likely pathogenic (Genomic Research Center, Shahid Beheshti University of Medical Sciences)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/638435/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/638435/</guid>
+  <pubDate>2025-12-11</pubDate>
+</item>
+<item>
+  <title>SCN2A VUS → path.</title>
+  <description>NM_001040142.2(SCN2A):c.605C&gt;T (p.Ala202Val) in gene SCN2A changed from VUS to pathogenic (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/449147/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/449147/</guid>
+  <pubDate>2025-12-03</pubDate>
+</item>
+<item>
+  <title>KDM5A path. → VUS</title>
+  <description>NM_001042603.3(KDM5A):c.4048C&gt;T (p.Arg1350Ter) in gene KDM5A changed from pathogenic to VUS (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/806762/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/806762/</guid>
+  <pubDate>2025-12-02</pubDate>
+</item>
+<item>
+  <title>UNC13A VUS → l.path.</title>
+  <description>NM_001080421.3(UNC13A):c.2786G&gt;A (p.Gly929Glu) in gene UNC13A changed from VUS to likely pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/982685/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/982685/</guid>
+  <pubDate>2025-11-12</pubDate>
+</item>
+<item>
+  <title>NF1 l.path. → path.</title>
+  <description>NM_001042492.3(NF1):c.2530C&gt;T (p.Leu844Phe) in gene NF1 changed from likely pathogenic to pathogenic (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/68321/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/68321/</guid>
+  <pubDate>2025-11-07</pubDate>
+</item>
+<item>
+  <title>SDHB l.path. → path.</title>
+  <description>NM_003000.3(SDHB):c.540_540+13del in gene SDHB changed from likely pathogenic to pathogenic (Labcorp Genetics (formerly Invitae), Labcorp)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/468236/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/468236/</guid>
+  <pubDate>2025-10-28</pubDate>
+</item>
+<item>
+  <title>SCN5A path. → l.ben.</title>
+  <description>NM_001099404.2(SCN5A):c.615T&gt;G (p.Tyr205Ter) in gene SCN5A changed from pathogenic to likely benign (Genomic Research Center, Shahid Beheshti University of Medical Sciences)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/587531/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/587531/</guid>
+  <pubDate>2025-10-22</pubDate>
+</item>
+<item>
+  <title>ATM l.path. → path.</title>
+  <description>NM_000051.4(ATM):c.6095G&gt;A (p.Arg2032Lys) in gene ATM changed from likely pathogenic to pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/181974/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/181974/</guid>
+  <pubDate>2025-10-20</pubDate>
+</item>
+<item>
+  <title>SLC22A5 VUS → l.path.</title>
+  <description>NM_003060.4(SLC22A5):c.470C&gt;T (p.Ser157Phe) in gene SLC22A5 changed from VUS to likely pathogenic (Natera, Inc.)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/947886/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/947886/</guid>
+  <pubDate>2025-10-03</pubDate>
+</item>
+<item>
+  <title>BRCA2 other → path.</title>
+  <description>NM_000059.4(BRCA2):c.2684del (p.Ala895fs) in gene BRCA2 changed from not provided to pathogenic (Labcorp Genetics (formerly Invitae), Labcorp)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/51327/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/51327/</guid>
+  <pubDate>2025-10-01</pubDate>
+</item>
+<item>
+  <title>OPTN l.path. → path.</title>
+  <description>NM_001008212.2(OPTN):c.493C&gt;T (p.Gln165Ter) in gene OPTN changed from likely pathogenic to pathogenic (Human Genetics Bochum, Ruhr University Bochum)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/1801690/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/1801690/</guid>
+  <pubDate>2025-09-13</pubDate>
+</item>
+<item>
+  <title> path. → l.path.</title>
+  <description> in gene  changed from pathogenic to likely pathogenic (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/2680774/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/2680774/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>POC1A l.path. → path.</title>
+  <description>NM_015426.5(POC1A):c.241C&gt;T (p.Arg81Ter) in gene POC1A changed from likely pathogenic to pathogenic (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/37062/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/37062/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title> path. → benign</title>
+  <description> in gene  changed from pathogenic to benign (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/2062/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/2062/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>SEC24D l.path. → VUS</title>
+  <description>NM_014822.4(SEC24D):c.697G&gt;C (p.Gly233Arg) in gene SEC24D changed from likely pathogenic to VUS (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/183297/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/183297/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>GUSB l.path. → path.</title>
+  <description>NM_000181.4(GUSB):c.1069C&gt;T (p.Arg357Ter) in gene GUSB changed from likely pathogenic to pathogenic (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/908/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/908/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>GUSB l.path. → path.</title>
+  <description>NM_000181.4(GUSB):c.1144C&gt;T (p.Arg382Cys) in gene GUSB changed from likely pathogenic to pathogenic (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/894/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/894/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>FSHR VUS → l.path.</title>
+  <description>NM_000145.4(FSHR):c.1121T&gt;A (p.Ile374Asn) in gene FSHR changed from VUS to likely pathogenic (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/812692/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/812692/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>LAMB3 path. → VUS</title>
+  <description>NM_000228.3(LAMB3):c.958_1034dup (p.Asn345fs) in gene LAMB3 changed from pathogenic to VUS (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/279829/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/279829/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>GEMIN4 l.path. → path.</title>
+  <description>NM_015721.3(GEMIN4):c.2452T&gt;C (p.Trp818Arg) in gene GEMIN4 changed from likely pathogenic to pathogenic (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/183310/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/183310/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>PCSK9 l.ben. → benign</title>
+  <description>NM_174936.4(PCSK9):c.657+9G&gt;A in gene PCSK9 changed from likely benign to benign (Genomic Medicine Center of Excellence, King Faisal Specialist Hospital and Research Centre)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/262906/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/262906/</guid>
+  <pubDate>2025-09-10</pubDate>
+</item>
+<item>
+  <title>PALB2 path. → l.path.</title>
+  <description>NM_024675.4(PALB2):c.3507_3508del (p.His1170fs) in gene PALB2 changed from pathogenic to likely pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/140978/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/140978/</guid>
+  <pubDate>2025-09-08</pubDate>
+</item>
+<item>
+  <title>APC other → other</title>
+  <description>NM_000038.6(APC):c.3920T&gt;A (p.Ile1307Lys) in gene APC changed from risk factor to not provided (OMIM)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/822/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/822/</guid>
+  <pubDate>2025-09-04</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → l.ben.</title>
+  <description>NM_001042492.3(NF1):c.7838C&gt;T (p.Pro2613Leu) in gene NF1 changed from VUS to likely benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/229734/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/229734/</guid>
+  <pubDate>2025-08-28</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → benign</title>
+  <description>NM_001042492.3(NF1):c.1553C&gt;T (p.Thr518Ile) in gene NF1 changed from VUS to benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/142755/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/142755/</guid>
+  <pubDate>2025-08-21</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → l.ben.</title>
+  <description>NM_001042492.3(NF1):c.4825G&gt;A (p.Val1609Ile) in gene NF1 changed from VUS to likely benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/231123/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/231123/</guid>
+  <pubDate>2025-08-16</pubDate>
+</item>
+<item>
+  <title>TP53 path. → l.path.</title>
+  <description>NM_000546.6(TP53):c.646GTG[2] (p.Val218del) in gene TP53 changed from pathogenic to likely pathogenic (German Consortium for Hereditary Breast and Ovarian Cancer, University Hospital Cologne)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/634761/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/634761/</guid>
+  <pubDate>2025-08-12</pubDate>
+</item>
+<item>
+  <title>EVC l.path. → path.</title>
+  <description>NM_153717.3(EVC):c.801+1G&gt;T in gene EVC changed from likely pathogenic to pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/2576547/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/2576547/</guid>
+  <pubDate>2025-08-06</pubDate>
+</item>
+<item>
+  <title>USH2A l.path. → path.</title>
+  <description>NM_206933.4(USH2A):c.12575G&gt;A (p.Arg4192His) in gene USH2A changed from likely pathogenic to pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/166434/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/166434/</guid>
+  <pubDate>2025-08-06</pubDate>
+</item>
+<item>
+  <title>NF1 l.path. → path.</title>
+  <description>NM_001042492.3(NF1):c.2125T&gt;C (p.Cys709Arg) in gene NF1 changed from likely pathogenic to pathogenic (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/428974/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/428974/</guid>
+  <pubDate>2025-07-25</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → l.ben.</title>
+  <description>NM_001042492.3(NF1):c.3871-4G&gt;A in gene NF1 changed from VUS to likely benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/233616/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/233616/</guid>
+  <pubDate>2025-07-17</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → l.ben.</title>
+  <description>NM_001042492.3(NF1):c.3906T&gt;G (p.Asp1302Glu) in gene NF1 changed from VUS to likely benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/184818/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/184818/</guid>
+  <pubDate>2025-07-01</pubDate>
+</item>
+<item>
+  <title>DNAH5 l.path. → VUS</title>
+  <description>NM_001369.3(DNAH5):c.8642C&gt;G (p.Ala2881Gly) in gene DNAH5 changed from likely pathogenic to VUS (NHS Central &amp; South Genomic Laboratory Hub)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/163139/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/163139/</guid>
+  <pubDate>2025-07-01</pubDate>
+</item>
+<item>
+  <title>ATP6V0A1 VUS → l.path.</title>
+  <description>NM_001130021.3(ATP6V0A1):c.53A&gt;T (p.Gln18Leu) in gene ATP6V0A1 changed from VUS to likely pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/1325812/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/1325812/</guid>
+  <pubDate>2025-06-30</pubDate>
+</item>
+<item>
+  <title>PALB2 path. → l.path.</title>
+  <description>NM_024675.4(PALB2):c.3362del (p.Gly1121fs) in gene PALB2 changed from pathogenic to likely pathogenic (Institute of Human Genetics, University of Leipzig Medical Center)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/126739/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/126739/</guid>
+  <pubDate>2025-06-25</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → l.ben.</title>
+  <description>NM_001042492.3(NF1):c.7442G&gt;T (p.Gly2481Val) in gene NF1 changed from VUS to likely benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/185891/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/185891/</guid>
+  <pubDate>2025-06-23</pubDate>
+</item>
+<item>
+  <title>PMS2 l.path. → path.</title>
+  <description>NM_000535.7(PMS2):c.137G&gt;T (p.Ser46Ile) in gene PMS2 changed from likely pathogenic to pathogenic (St. Jude Molecular Pathology, St. Jude Children's Research Hospital)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/9245/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/9245/</guid>
+  <pubDate>2025-06-17</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → l.ben.</title>
+  <description>NM_001042492.3(NF1):c.7340AAG[1] (p.Glu2448del) in gene NF1 changed from VUS to likely benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/141719/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/141719/</guid>
+  <pubDate>2025-06-17</pubDate>
+</item>
+<item>
+  <title>SLC22A5 VUS → l.path.</title>
+  <description>NM_003060.4(SLC22A5):c.131C&gt;T (p.Ala44Val) in gene SLC22A5 changed from VUS to likely pathogenic (Natera, Inc.)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/573546/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/573546/</guid>
+  <pubDate>2025-06-17</pubDate>
+</item>
+<item>
+  <title>NF1 VUS → l.ben.</title>
+  <description>NM_001042492.3(NF1):c.1936G&gt;T (p.Asp646Tyr) in gene NF1 changed from VUS to likely benign (Ambry Genetics)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/232947/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/232947/</guid>
+  <pubDate>2025-06-11</pubDate>
+</item>
+<item>
+  <title>BRIP1 l.path. → path.</title>
+  <description>NM_032043.3(BRIP1):c.2487del (p.Gly830fs) in gene BRIP1 changed from likely pathogenic to pathogenic (Women's Health and Genetics/Laboratory Corporation of America, LabCorp)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/1723381/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/1723381/</guid>
+  <pubDate>2025-06-06</pubDate>
+</item>
+<item>
+  <title>SDHA VUS → path.</title>
+  <description>NM_004168.4(SDHA):c.91C&gt;T (p.Arg31Ter) in gene SDHA changed from VUS to pathogenic (Cambridge Genomics Laboratory, East Genomic Laboratory Hub, NHS Genomic Medicine Service)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/142601/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/142601/</guid>
+  <pubDate>2025-06-04</pubDate>
+</item>
+<item>
+  <title>MSH6 VUS → l.ben.</title>
+  <description>NM_000179.3(MSH6):c.2641delinsAAAA (p.Gly881delinsLysSer) in gene MSH6 changed from VUS to likely benign (Labcorp Genetics (formerly Invitae), Labcorp)</description>
+  <link>https://www.ncbi.nlm.nih.gov/clinvar/variation/89305/</link>
+  <guid>https://www.ncbi.nlm.nih.gov/clinvar/variation/89305/</guid>
+  <pubDate>2025-06-04</pubDate>
+</item>
+</channel></rss>
