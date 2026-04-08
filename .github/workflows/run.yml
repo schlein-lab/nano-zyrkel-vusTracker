@@ -2,7 +2,7 @@ name: "ClinVar VUS Tracker"
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 */3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -16,6 +16,18 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Install system deps
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
@@ -35,6 +47,5 @@ jobs:
           git config user.email "nano@zyrkel.local"
           git add staging/
           git diff --staged --quiet || \
-            git commit -m "clinvar $(date -u +%Y-%m-%d)"
+            git commit -m "clinvar $(date -u +%Y-%m-%d-%H%M)"
           git push || true
-# trigger

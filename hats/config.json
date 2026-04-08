@@ -1,7 +1,7 @@
 {
   "id": "clinvar-tracker",
   "description": "ClinVar VUS reclassification + submission tracker",
-  "type": "clinvar",
+  "type": "clin_var",
   "source": {
     "url": "https://eutils.ncbi.nlm.nih.gov",
     "method": "GET"
