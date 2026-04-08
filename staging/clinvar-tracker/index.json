@@ -1,18 +1,18 @@
 {
   "classifications": {
-    "VUS": 2330692,
-    "benign": 212632,
-    "confl.": 161799,
-    "l.ben.": 1085981,
-    "l.path.": 120529,
-    "other": 116626,
-    "path.": 212007
+    "VUS": 2315955,
+    "benign": 210617,
+    "confl.": 161487,
+    "l.ben.": 1083097,
+    "l.path.": 119111,
+    "other": 115616,
+    "path.": 202535
   },
   "date_range": {
-    "from": "9999",
-    "to": "Sep 30, 2025"
+    "from": "1965-01-01",
+    "to": "2026-04-02"
   },
-  "generated_at": "2026-04-08T16:26:54.933596500+00:00",
+  "generated_at": "2026-04-08T17:05:49.710711700+00:00",
   "top_genes": [
     [
       "TTN",
@@ -216,5 +216,5 @@
     ]
   ],
   "total_reclassifications": 10779,
-  "total_variants": 4240266
+  "total_variants": 4208418
 }
