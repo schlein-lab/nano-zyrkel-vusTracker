@@ -266,6 +266,16 @@ function renderGeneFocus(gene) {
   // Donut placeholder (segments proportional)
   const total = g.total || 1;
   donutEl.innerHTML = renderDonutSVG(p, g.vus || 0, b, g.conflicting || 0, total);
+
+  // Full donut chart with per-class breakdown
+  renderDonut('focus-donut-detail', {
+    pathogenic: g.pathogenic || 0,
+    likely_pathogenic: g.likely_pathogenic || 0,
+    vus: g.vus || 0,
+    likely_benign: g.likely_benign || 0,
+    benign: g.benign || 0,
+    conflicting: g.conflicting || 0,
+  });
 }
 
 function renderDonutSVG(path, vus, ben, confl, total) {
@@ -287,6 +297,243 @@ function renderDonutSVG(path, vus, ben, confl, total) {
     return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${dash}" stroke-dashoffset="${-o}" />`;
   }).join('');
   return `<svg viewBox="0 0 40 40" style="width:36px;height:36px;">${arcs}</svg>`;
+}
+
+// ── Donut Chart — Classification Distribution ──────────────
+
+function renderDonut(containerId, data) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const total = (data.pathogenic || 0) + (data.likely_pathogenic || 0) +
+    (data.vus || 0) + (data.likely_benign || 0) + (data.benign || 0) + (data.conflicting || 0);
+  if (total <= 0) { el.innerHTML = ''; return; }
+
+  const segments = [
+    { val: data.pathogenic || 0, color: '#dc2626', label: 'Path' },
+    { val: data.likely_pathogenic || 0, color: '#f59e0b', label: 'L.Path' },
+    { val: data.vus || 0, color: '#eab308', label: 'VUS' },
+    { val: data.likely_benign || 0, color: '#22c55e', label: 'L.Ben' },
+    { val: data.benign || 0, color: '#16a34a', label: 'Ben' },
+    { val: data.conflicting || 0, color: '#8b5cf6', label: 'Confl' },
+  ].filter(s => s.val > 0);
+
+  const cx = 30, cy = 30, r = 22, ir = 14;
+  let angle = -Math.PI / 2;
+  const paths = segments.map(s => {
+    const sweep = (s.val / total) * 2 * Math.PI;
+    const a1 = angle, a2 = angle + sweep;
+    angle = a2;
+    const large = sweep > Math.PI ? 1 : 0;
+    const x1o = cx + r * Math.cos(a1), y1o = cy + r * Math.sin(a1);
+    const x2o = cx + r * Math.cos(a2), y2o = cy + r * Math.sin(a2);
+    const x2i = cx + ir * Math.cos(a2), y2i = cy + ir * Math.sin(a2);
+    const x1i = cx + ir * Math.cos(a1), y1i = cy + ir * Math.sin(a1);
+    const d = `M${x1o},${y1o} A${r},${r} 0 ${large} 1 ${x2o},${y2o} L${x2i},${y2i} A${ir},${ir} 0 ${large} 0 ${x1i},${y1i} Z`;
+    return `<path d="${d}" fill="${s.color}"><title>${s.label}: ${s.val}</title></path>`;
+  }).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 60 60" style="width:60px;height:60px;">
+    ${paths}
+    <text x="${cx}" y="${cy + 1}" text-anchor="middle" dominant-baseline="middle"
+      fill="#334155" font-size="8" font-weight="700">${total >= 1000 ? (total / 1000).toFixed(1) + 'k' : total}</text>
+  </svg>`;
+}
+
+// ── Submissions Timeline — Stacked Area Chart ──────────────
+
+function renderTimeline(containerId, timelineData) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const months = timelineData?.months;
+  if (!months || !Object.keys(months).length) { el.innerHTML = ''; return; }
+
+  const keys = Object.keys(months).sort();
+  const n = keys.length;
+  const w = 400, h = 80, pad = { l: 30, r: 5, t: 5, b: 18 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+  // Aggregate into 3 categories per month
+  const cats = keys.map(k => {
+    const m = months[k];
+    const p = (m['path.'] || 0) + (m['l.path.'] || 0) + (m['Pathogenic'] || 0) + (m['Likely pathogenic'] || 0);
+    const v = (m['VUS'] || 0) + (m['Uncertain significance'] || 0);
+    const b = (m['benign'] || 0) + (m['l.ben.'] || 0) + (m['Benign'] || 0) + (m['Likely benign'] || 0);
+    return { p, v, b, total: p + v + b };
+  });
+  const maxY = Math.max(1, ...cats.map(c => c.total));
+
+  function xAt(i) { return pad.l + (i / Math.max(1, n - 1)) * pw; }
+  function yAt(val) { return pad.t + ph - (val / maxY) * ph; }
+
+  // Build stacked area paths (bottom to top: benign, vus, path)
+  let ptsBen = '', ptsVus = '', ptsPath = '';
+  let baseLine = keys.map((_, i) => `${xAt(i)},${yAt(0)}`);
+  let cumBen = cats.map(c => c.b);
+  let cumVus = cats.map(c => c.b + c.v);
+  let cumAll = cats.map(c => c.total);
+
+  const areaPath = (upper, lower) => {
+    const top = upper.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' L');
+    const bot = [...lower].reverse().map((v, i) => `${xAt(n - 1 - i)},${yAt(v)}`).join(' L');
+    return `M${top} L${bot} Z`;
+  };
+
+  const benPath = areaPath(cumBen, cats.map(() => 0));
+  const vusPath = areaPath(cumVus, cumBen);
+  const pathPath = areaPath(cumAll, cumVus);
+
+  // X-axis labels (show ~5 labels)
+  const step = Math.max(1, Math.floor(n / 5));
+  const labels = keys.filter((_, i) => i % step === 0 || i === n - 1)
+    .map(k => `<text x="${xAt(keys.indexOf(k))}" y="${h - 2}" text-anchor="middle" fill="#94a3b8" font-size="6">${k.slice(2, 7)}</text>`)
+    .join('');
+
+  // Y-axis labels
+  const yLabels = `<text x="${pad.l - 3}" y="${pad.t + 4}" text-anchor="end" fill="#94a3b8" font-size="6">${maxY}</text>`
+    + `<text x="${pad.l - 3}" y="${yAt(0) + 1}" text-anchor="end" fill="#94a3b8" font-size="6">0</text>`;
+
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;" preserveAspectRatio="none">
+    <path d="${benPath}" fill="#16a34a" opacity="0.5"/>
+    <path d="${vusPath}" fill="#eab308" opacity="0.5"/>
+    <path d="${pathPath}" fill="#dc2626" opacity="0.5"/>
+    ${labels}${yLabels}
+  </svg>`;
+}
+
+// ── Interactive VUS Survival Curve ─────────────────────────
+
+function renderSurvivalInteractive(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el || !tracker) { if (el) el.innerHTML = ''; return; }
+
+  // Gene selector
+  const genes = Object.keys(indexCache?.gene_breakdowns || {}).slice(0, 50);
+  const selGene = focusGene || genes[0] || 'BRCA1';
+  const options = genes.map(g => `<option value="${g}" ${g === selGene ? 'selected' : ''}>${g}</option>`).join('');
+
+  el.innerHTML = `<div style="margin-bottom:4px;">
+    <select id="survival-gene-sel" onchange="updateSurvivalCurve()" style="font-size:10px;padding:2px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;">
+      ${options}
+    </select>
+    <span style="font-size:9px;color:#94a3b8;margin-left:4px;">VUS Survival</span>
+  </div>
+  <div id="survival-chart"></div>`;
+
+  window.updateSurvivalCurve = function () {
+    const gene = document.getElementById('survival-gene-sel').value;
+    drawSurvivalCurve('survival-chart', gene);
+  };
+  drawSurvivalCurve('survival-chart', selGene);
+}
+
+function drawSurvivalCurve(containerId, gene) {
+  const el = document.getElementById(containerId);
+  if (!el || !tracker) return;
+
+  let curve;
+  try {
+    curve = JSON.parse(tracker.vus_survival_curve(gene));
+  } catch (e) { el.innerHTML = '<span style="color:#94a3b8;font-size:9px;">No survival data</span>'; return; }
+
+  const points = curve.points || curve;
+  if (!points || !points.length) { el.innerHTML = '<span style="color:#94a3b8;font-size:9px;">No data</span>'; return; }
+
+  const w = 400, h = 100, pad = { l: 30, r: 10, t: 10, b: 20 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const maxX = Math.max(1, points[points.length - 1].days || points[points.length - 1].x || 1);
+
+  function xAt(d) { return pad.l + (d / maxX) * pw; }
+  function yAt(f) { return pad.t + ph - f * ph; }
+
+  const linePts = points.map(p => {
+    const d = p.days !== undefined ? p.days : p.x;
+    const f = p.fraction !== undefined ? p.fraction : p.y;
+    return `${xAt(d)},${yAt(f)}`;
+  }).join(' L');
+
+  // Hover circles with titles
+  const circles = points.filter((_, i) => i % Math.max(1, Math.floor(points.length / 20)) === 0).map(p => {
+    const d = p.days !== undefined ? p.days : p.x;
+    const f = p.fraction !== undefined ? p.fraction : p.y;
+    return `<circle cx="${xAt(d)}" cy="${yAt(f)}" r="3" fill="#0f766e" opacity="0"><title>Day ${d}: ${(f * 100).toFixed(1)}% still VUS</title></circle>`
+      + `<circle cx="${xAt(d)}" cy="${yAt(f)}" r="8" fill="transparent"><title>Day ${d}: ${(f * 100).toFixed(1)}% still VUS</title></circle>`;
+  }).join('');
+
+  // Axes
+  const xLabels = [0, Math.round(maxX / 2), maxX].map(d =>
+    `<text x="${xAt(d)}" y="${h - 3}" text-anchor="middle" fill="#94a3b8" font-size="6">${d}d</text>`
+  ).join('');
+  const yLabels = [0, 0.5, 1].map(f =>
+    `<text x="${pad.l - 3}" y="${yAt(f) + 2}" text-anchor="end" fill="#94a3b8" font-size="6">${f}</text>`
+  ).join('');
+  const gridLines = [0.25, 0.5, 0.75].map(f =>
+    `<line x1="${pad.l}" y1="${yAt(f)}" x2="${w - pad.r}" y2="${yAt(f)}" stroke="#f1f5f9" stroke-width="0.5"/>`
+  ).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100px;">
+    ${gridLines}
+    <polyline points="${linePts}" fill="none" stroke="#0f766e" stroke-width="1.5"/>
+    ${circles}
+    ${xLabels}${yLabels}
+    <text x="${w / 2}" y="${h}" text-anchor="middle" fill="#94a3b8" font-size="5">days since VUS submission</text>
+  </svg>`;
+}
+
+// ── Changes Heatmap ────────────────────────────────────────
+
+function renderChangesHeatmap(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el || !tracker) { if (el) el.innerHTML = ''; return; }
+
+  let timeline;
+  try {
+    timeline = JSON.parse(tracker.changes_timeline());
+  } catch (e) { el.innerHTML = ''; return; }
+
+  const months = timeline?.months;
+  if (!months || !Object.keys(months).length) { el.innerHTML = ''; return; }
+
+  const keys = Object.keys(months).sort().slice(-24); // last 24 months
+  const rows = ['VUS_to_path.', 'path._to_VUS', 'VUS_to_ben.', 'ben._to_VUS'];
+  const rowLabels = ['VUS\u2192Path', 'Path\u2192VUS', 'VUS\u2192Ben', 'Ben\u2192VUS'];
+
+  // Find max value for color scaling
+  let maxVal = 1;
+  keys.forEach(k => {
+    rows.forEach(r => {
+      const v = months[k]?.[r] || 0;
+      if (v > maxVal) maxVal = v;
+    });
+  });
+
+  const cellW = 14, cellH = 14, labelW = 50, headerH = 12;
+  const w = labelW + keys.length * cellW + 4;
+  const h = headerH + rows.length * cellH + 4;
+
+  const cells = [];
+  rows.forEach((row, ri) => {
+    cells.push(`<text x="${labelW - 3}" y="${headerH + ri * cellH + cellH / 2 + 1}" text-anchor="end" dominant-baseline="middle" fill="#64748b" font-size="6">${rowLabels[ri]}</text>`);
+    keys.forEach((k, ci) => {
+      const v = months[k]?.[row] || 0;
+      const intensity = v / maxVal;
+      const r = Math.round(255 - intensity * (255 - 220));
+      const g = Math.round(255 - intensity * (255 - 38));
+      const b = Math.round(255 - intensity * (255 - 38));
+      const color = v === 0 ? '#f8fafc' : `rgb(${r},${g},${b})`;
+      cells.push(`<rect x="${labelW + ci * cellW}" y="${headerH + ri * cellH}" width="${cellW - 1}" height="${cellH - 1}" rx="1" fill="${color}"><title>${k}: ${rowLabels[ri]} = ${v}</title></rect>`);
+    });
+  });
+
+  // Month labels (show every 3rd)
+  const monthLabels = keys.filter((_, i) => i % 3 === 0).map((k, i) => {
+    const ci = keys.indexOf(k);
+    return `<text x="${labelW + ci * cellW + cellW / 2}" y="${headerH - 2}" text-anchor="middle" fill="#94a3b8" font-size="5">${k.slice(2, 7)}</text>`;
+  }).join('');
+
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
+    ${monthLabels}
+    ${cells.join('')}
+  </svg>`;
 }
 
 // ── Variant List (from WASM query) ──────────────────────────
@@ -529,7 +776,42 @@ function renderStats(period) {
     <div class="row"><span>Classification changes</span><span class="val">${formatNumber(reclassCount)}</span></div>
     <div class="row"><span>Date range</span><span class="val">${indexCache.date_range?.from || '?'} \u2014 ${indexCache.date_range?.to || '?'}</span></div>
     <div class="row"><span>Generated</span><span class="val">${(indexCache.generated_at || '').substring(0, 10)}</span></div>
+    <div id="stats-timeline-wrap" style="margin-top:10px;"></div>
+    <div id="stats-survival-wrap" style="margin-top:10px;"></div>
+    <div id="stats-heatmap-wrap" style="margin-top:10px;"></div>
   `;
+
+  // Render submission timeline if WASM data available
+  if (tracker && focusGene) {
+    try {
+      const tl = JSON.parse(tracker.submissions_timeline(focusGene));
+      if (tl && tl.months) {
+        const wrap = document.getElementById('stats-timeline-wrap');
+        if (wrap) {
+          wrap.innerHTML = '<div class="section-title" style="margin-top:4px;">Submissions Timeline</div><div id="stats-timeline"></div>';
+          renderTimeline('stats-timeline', tl);
+        }
+      }
+    } catch (e) { /* no timeline data */ }
+  }
+
+  // Render interactive survival curve
+  if (tracker && loadedChunks.size > 0) {
+    const wrap = document.getElementById('stats-survival-wrap');
+    if (wrap) {
+      wrap.innerHTML = '<div class="section-title" style="margin-top:4px;">VUS Survival Curve</div><div id="stats-survival"></div>';
+      renderSurvivalInteractive('stats-survival');
+    }
+  }
+
+  // Render changes heatmap
+  if (tracker && loadedChunks.size > 0) {
+    const wrap = document.getElementById('stats-heatmap-wrap');
+    if (wrap) {
+      wrap.innerHTML = '<div class="section-title" style="margin-top:4px;">Changes Heatmap</div><div id="stats-heatmap"></div>';
+      renderChangesHeatmap('stats-heatmap');
+    }
+  }
 }
 
 // ── Report Date ─────────────────────────────────────────────
