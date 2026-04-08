@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 mod action;
 mod clinvar;
+mod clinvar_runner;
 mod config;
 mod condition;
 mod fetch;
@@ -103,7 +104,7 @@ async fn main() -> Result<()> {
 
     // ── ClinVar tracker: fetch variants, compute stats, generate widget ──
     if matches!(config.hat_type, config::HatType::ClinVar) {
-        return clinvar::run_clinvar(&config, cli.dry_run).await;
+        return clinvar_runner::run_clinvar(&config, cli.dry_run).await;
     }
 
     // ── Standard nano mode: fetch → condition → notify → act ──
