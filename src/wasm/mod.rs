@@ -79,15 +79,60 @@ impl VusTracker {
         self.reclassifications.len()
     }
 
-    /// Search by gene name. Returns JSON array of matching variants.
+    /// Search by gene name. Returns JSON with total count + paginated sample.
     pub fn search_gene(&self, gene: &str) -> String {
         let upper = gene.to_uppercase();
         let indices = self.gene_index.get(&upper);
-        let results: Vec<&ClinVarVariant> = match indices {
-            Some(idxs) => idxs.iter().take(100).map(|&i| &self.variants[i]).collect(),
-            None => Vec::new(),
+        match indices {
+            Some(idxs) => {
+                let sample: Vec<&ClinVarVariant> = idxs.iter().take(50).map(|&i| &self.variants[i]).collect();
+                serde_json::json!({
+                    "total": idxs.len(),
+                    "sample": sample,
+                }).to_string()
+            }
+            None => serde_json::json!({"total": 0, "sample": []}).to_string(),
+        }
+    }
+
+    /// Get classification breakdown for a gene. Returns JSON with counts per class.
+    pub fn gene_stats(&self, gene: &str) -> String {
+        let upper = gene.to_uppercase();
+        let indices = match self.gene_index.get(&upper) {
+            Some(idxs) => idxs,
+            None => return serde_json::json!({"total": 0}).to_string(),
         };
-        serde_json::to_string(&results).unwrap_or_else(|_| "[]".into())
+
+        let mut path = 0u32;
+        let mut lpath = 0u32;
+        let mut vus = 0u32;
+        let mut lben = 0u32;
+        let mut ben = 0u32;
+        let mut confl = 0u32;
+        let mut other = 0u32;
+
+        for &i in indices {
+            match &self.variants[i].classification {
+                Classification::Pathogenic => path += 1,
+                Classification::LikelyPathogenic => lpath += 1,
+                Classification::Vus => vus += 1,
+                Classification::LikelyBenign => lben += 1,
+                Classification::Benign => ben += 1,
+                Classification::ConflictingInterpretations => confl += 1,
+                Classification::Other(_) => other += 1,
+            }
+        }
+
+        serde_json::json!({
+            "total": indices.len(),
+            "pathogenic": path,
+            "likely_pathogenic": lpath,
+            "vus": vus,
+            "likely_benign": lben,
+            "benign": ben,
+            "conflicting": confl,
+            "other": other,
+        }).to_string()
     }
 
     /// Search by HGVS or variant name (substring match). Returns JSON array.
