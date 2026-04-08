@@ -529,6 +529,143 @@ impl VusTracker {
             "result": result,
         }).to_string()
     }
+
+    /// Detect variant clusters within a gene by genomic position.
+    /// Sliding window, returns regions with >2x mean density.
+    pub fn detect_hotspots(&self, gene: &str, window_bp: u32) -> String {
+        let upper = gene.to_uppercase();
+        let indices = match self.gene_index.get(&upper) {
+            Some(idxs) => idxs,
+            None => return "[]".into(),
+        };
+
+        // Collect variants with valid positions
+        let mut positioned: Vec<(u64, &ClinVarVariant)> = indices.iter()
+            .map(|&i| &self.variants[i])
+            .filter(|v| v.pos > 0)
+            .map(|v| (v.pos, v))
+            .collect();
+
+        if positioned.is_empty() {
+            return "[]".into();
+        }
+
+        positioned.sort_unstable_by_key(|&(p, _)| p);
+
+        let min_pos = positioned[0].0;
+        let max_pos = positioned[positioned.len() - 1].0;
+        let window = window_bp as u64;
+
+        if window == 0 || max_pos < min_pos {
+            return "[]".into();
+        }
+
+        // Build windows
+        let mut windows: Vec<(u64, u64, u32, u32, u32, u32)> = Vec::new(); // start, end, count, path, vus, ben
+        let mut win_start = min_pos;
+
+        while win_start <= max_pos {
+            let win_end = win_start + window;
+            let mut count = 0u32;
+            let mut pathogenic = 0u32;
+            let mut vus = 0u32;
+            let mut benign = 0u32;
+
+            // Binary search for window start
+            let lo = positioned.partition_point(|&(p, _)| p < win_start);
+            for &(p, v) in &positioned[lo..] {
+                if p >= win_end {
+                    break;
+                }
+                count += 1;
+                match &v.classification {
+                    Classification::Pathogenic | Classification::LikelyPathogenic => pathogenic += 1,
+                    Classification::Vus => vus += 1,
+                    Classification::Benign | Classification::LikelyBenign => benign += 1,
+                    _ => {}
+                }
+            }
+            windows.push((win_start, win_end, count, pathogenic, vus, benign));
+            win_start = win_end;
+        }
+
+        // Mean density
+        let total_count: u32 = windows.iter().map(|w| w.2).sum();
+        let mean = total_count as f64 / windows.len() as f64;
+        let threshold = (mean * 2.0).max(1.0);
+
+        // Filter to hotspots
+        let hotspots: Vec<serde_json::Value> = windows.into_iter()
+            .filter(|w| w.2 as f64 > threshold)
+            .map(|(start, end, count, pathogenic, vus, benign)| {
+                serde_json::json!({
+                    "start": start,
+                    "end": end,
+                    "count": count,
+                    "pathogenic": pathogenic,
+                    "vus": vus,
+                    "benign": benign,
+                })
+            })
+            .collect();
+
+        serde_json::to_string(&hotspots).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Bin loaded variants by chromosome position (1MB bins).
+    /// Returns per-chromosome density for ideogram visualization.
+    pub fn loaded_chromosome_density(&self) -> String {
+        // chrom -> (bin_index -> count)
+        let mut density: HashMap<&str, HashMap<u64, u32>> = HashMap::new();
+
+        for v in &self.variants {
+            if v.chrom.is_empty() || v.pos == 0 {
+                continue;
+            }
+            let bin = v.pos / 1_000_000;
+            *density.entry(v.chrom.as_str()).or_default().entry(bin).or_insert(0) += 1;
+        }
+
+        // Convert to sorted arrays per chromosome
+        let mut result: HashMap<&str, Vec<(u64, u32)>> = HashMap::with_capacity(density.len());
+        for (chrom, bins) in &density {
+            let mut sorted: Vec<(u64, u32)> = bins.iter().map(|(&b, &c)| (b, c)).collect();
+            sorted.sort_unstable_by_key(|&(b, _)| b);
+            result.insert(chrom, sorted);
+        }
+
+        serde_json::to_string(&result).unwrap_or_else(|_| "{}".into())
+    }
+
+    /// Search variants by condition/phenotype. Returns matching variants across all loaded genes.
+    pub fn filter_by_condition(&self, query: &str) -> String {
+        let q = query.to_lowercase();
+        let mut matched: Vec<&ClinVarVariant> = Vec::new();
+        let mut genes: Vec<String> = Vec::new();
+        let mut gene_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut total = 0usize;
+
+        for v in &self.variants {
+            if v.condition.to_lowercase().contains(&q) {
+                total += 1;
+                if matched.len() < 100 {
+                    matched.push(v);
+                }
+                let upper = v.gene.to_uppercase();
+                if gene_set.insert(upper.clone()) {
+                    genes.push(upper);
+                }
+            }
+        }
+
+        genes.sort_unstable();
+
+        serde_json::json!({
+            "total": total,
+            "variants": matched,
+            "genes": genes,
+        }).to_string()
+    }
 }
 
 impl VusTracker {
