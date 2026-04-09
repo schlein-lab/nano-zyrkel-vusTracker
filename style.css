@@ -40,10 +40,10 @@ body {
 
 /* Header bar */
 .widget-header { border-bottom: 1px solid var(--border); }
-.widget-banner { position: relative; height: 80px; overflow: hidden; border-radius: 16px 16px 0 0; }
+.widget-banner { position: relative; height: 60px; overflow: hidden; border-radius: 16px 16px 0 0; }
 .banner-img { width: 100%; height: 100%; object-fit: cover; }
 .banner-overlay { position: absolute; inset: 0; background: linear-gradient(135deg, rgba(139,92,246,0.7), rgba(6,182,212,0.5)); display: flex; flex-direction: column; justify-content: center; align-items: center; }
-.banner-title { font-size: 18px; font-weight: 800; color: #fff; letter-spacing: 0.02em; text-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+.banner-title { font-size: 22px; font-weight: 800; color: #fff; letter-spacing: -0.5px; text-shadow: 0 1px 3px rgba(0,0,0,0.2); font-family: var(--font); }
 .banner-subtitle { font-size: 10px; color: rgba(255,255,255,0.85); font-weight: 500; }
 .header-bottom { display: flex; align-items: center; justify-content: space-between; padding: 6px 16px; }
 
@@ -718,7 +718,7 @@ body {
 .pheno-link:hover { background: var(--brand); color: #fff; }
 
 /* Search mode toggle */
-.search-mode-toggle { display: flex; gap: 4px; margin-bottom: 6px; }
+.search-mode-toggle { display: flex; gap: 4px; margin-top: 2px; margin-bottom: 6px; justify-content: center; padding: 0 16px; }
 .search-mode-btn { font-size: 10px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text-secondary); cursor: pointer; transition: all 0.15s; }
 .search-mode-btn.active { background: var(--brand-light); color: var(--brand); border-color: var(--brand); font-weight: 600; }
 .search-mode-btn:hover:not(.active) { border-color: var(--text-secondary); }
