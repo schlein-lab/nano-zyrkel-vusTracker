@@ -34,13 +34,19 @@ body {
   border-radius: 16px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
   border: 1px solid var(--border);
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   max-width: 420px;
+  height: 700px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Header bar */
-.widget-header { border-bottom: 1px solid var(--border); }
+.widget-content { flex: 1; overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.widget-content::-webkit-scrollbar { width: 4px; }
+.widget-content::-webkit-scrollbar-track { background: transparent; }
+.widget-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.widget-header { border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .widget-banner { position: relative; height: 60px; overflow: hidden; border-radius: 16px 16px 0 0; }
 .banner-img { width: 100%; height: 100%; object-fit: cover; }
 .banner-overlay { position: absolute; inset: 0; background: linear-gradient(135deg, rgba(139,92,246,0.7), rgba(6,182,212,0.5)); display: flex; flex-direction: column; justify-content: center; align-items: center; }
@@ -247,7 +253,7 @@ body {
 }
 
 /* Gene detail mode */
-.gene-detail { padding: 0 16px 16px; }
+.gene-detail { padding: 0 16px 16px; flex: 1; overflow-y: auto; min-height: 0; }
 
 .back-btn {
   display: inline-flex;
@@ -679,8 +685,9 @@ body {
 
 /* Scroll area for gene detail */
 .detail-scroll {
-  max-height: 520px;
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
@@ -711,6 +718,7 @@ body {
   font-size: 10px;
   color: var(--text-secondary);
   text-align: center;
+  flex-shrink: 0;
 }
 
 /* Phenotype links */
