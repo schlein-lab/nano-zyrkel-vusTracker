@@ -28,6 +28,7 @@ const state = {
   phenotypeGenes: null,
   selectedHpoTerms: [],
   geneListPage: 0,
+  openSection: null, // track which section is open to preserve on re-render
 };
 
 // ── API helper ─────────────────────────────────────────────────────────────
@@ -903,7 +904,9 @@ function computingPlaceholder(msg) {
 
 // ── Collapsible Section ────────────────────────────────────────────────────
 function makeSection(title, contentOrFn, collapsed = false) {
-  const section = h('div', { className: `section${collapsed ? ' collapsed' : ''}`, 'data-accordion': 'true' });
+  // If this section was open before re-render, keep it open
+  const shouldBeOpen = state.openSection === title || (!collapsed && !state.openSection);
+  const section = h('div', { className: `section${shouldBeOpen ? '' : ' collapsed'}`, 'data-accordion': 'true', 'data-section-title': title });
   const header = h('div', { className: 'section-header' }, [
     h('span', { className: 'section-title' }, title),
     h('span', { className: 'section-toggle' }, '\u25BC'),
@@ -921,6 +924,8 @@ function makeSection(title, contentOrFn, collapsed = false) {
       });
     }
     section.classList.toggle('collapsed');
+    // Remember which section is open
+    state.openSection = wasCollapsed ? title : null;
     // Lazy render: only build content on first expand
     if (wasCollapsed && !rendered && typeof contentOrFn === 'function') {
       rendered = true;
@@ -928,11 +933,11 @@ function makeSection(title, contentOrFn, collapsed = false) {
     }
   });
 
-  // If not collapsed or content is already an element, render immediately
+  // Render content if open
   if (typeof contentOrFn !== 'function') {
     body.appendChild(contentOrFn);
     rendered = true;
-  } else if (!collapsed) {
+  } else if (shouldBeOpen) {
     body.appendChild(contentOrFn());
     rendered = true;
   }
