@@ -1,703 +1,1675 @@
-// nano-zyrkel-vusTracker — Two-mode UI: Overview + Gene Dashboard.
-// All computation runs locally via WASM. No data leaves the browser.
-let tracker = null, indexCache = null, loadedChunks = new Set();
-let focusGene = '', activeRange = 'all', searchTimeout = null, acIndex = -1;
-const DATA_BASE = '.';
-const currentFilters = { gene:'', classes:[0,1,2,3,4,5,6], date_from:'', search:'', sort_by:'date', sort_asc:false, limit:50, offset:0 };
-const $ = id => document.getElementById(id);
-let lastHeroGene = '';
+const API_BASE = 'https://vus.zyrkel.com/api/v1';
+const API_KEY = '781a2daba1bac1a74bcf3e58a630732fb3a63fec9dcb232b623e4cc5c8491ec4';
 
-window.toggleSection = function(el) {
-  const body = el.nextElementSibling;
-  if (body) {
-    el.classList.toggle('collapsed');
-    body.classList.toggle('collapsed');
-  }
+// ── State ──────────────────────────────────────────────────────────────────
+const state = {
+  mode: 'overview',
+  stats: null,
+  genes: [],
+  selectedGene: null,
+  geneData: {},
+  variants: [],
+  variantsMeta: {},
+  timeRange: '1m',
+  activeFilters: new Set(['pathogenic', 'likely_pathogenic', 'uncertain_significance', 'likely_benign', 'benign']),
+  variantPage: 1,
+  searchResults: null,
+  searchTimeout: null,
+  genomeBrowser: { zoom: 1, panX: 0, dragging: false, lastX: 0 },
+  hgvsFilter: '',
+  codingFilter: 'all', // 'all', 'coding', 'noncoding'
+  positionFrom: '',
+  positionTo: '',
+  expandedVariants: new Set(),
+  searchMode: 'gene', // 'gene' or 'phenotype'
+  topConditions: [],
+  conditionListPage: 0,
+  phenotypeResults: null,
+  phenotypeGenes: null,
+  selectedHpoTerms: [],
+  geneListPage: 0,
 };
 
-function animateNumber(el, target, duration = 800) {
-  const start = 0;
-  const startTime = performance.now();
-  function frame(now) {
-    const elapsed = now - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const eased = 1 - Math.pow(1 - progress, 3);
-    const current = Math.round(start + (target - start) * eased);
-    el.textContent = fmt(current);
-    if (progress < 1) requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
+// ── API helper ─────────────────────────────────────────────────────────────
+async function api(path, params = {}) {
+  params.api_key = API_KEY;
+  const qs = new URLSearchParams(params).toString();
+  const url = `${API_BASE}${path}?${qs}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  return res.json();
 }
 
-async function init() {
-  try {
-    const wasm = await import('./pkg/vus_tracker_lib.js');
-    await wasm.default(); tracker = new wasm.VusTracker();
-    $('hero-number').textContent = 'Loading...';
-    const r = await fetch(`${DATA_BASE}/data/index.json`);
-    if (!r.ok) throw new Error('Failed to load index.json');
-    indexCache = await r.json();
-    renderOverview();
-    $('search').addEventListener('input', onSearchInput);
-    $('search').addEventListener('keydown', onSearchKeydown);
-    $('report-date').addEventListener('change', onReportDate);
-    document.addEventListener('click', e => { if (!e.target.closest('.search-wrap')) hideAutocomplete(); });
-    setupVCFDrop();
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('embed') === 'true') document.body.classList.add('embed');
-    const urlGene = params.get('gene');
-    if (urlGene) {
-      await selectGene(urlGene.toUpperCase());
-    } else {
-      renderOverview();
-    }
-  } catch (e) {
-    console.error('Init failed:', e);
-    $('hero-number').textContent = 'Error'; $('hero-subtitle').textContent = e.message;
-  }
-}
-
-// ── Overview Mode ──────────────────────────────────────────
-function renderOverview() {
-  $('overview-mode').style.display = ''; $('gene-mode').style.display = 'none'; $('clear-btn').style.display = 'none';
-  renderHero(); renderTopGenes(); renderIdeogram();
-}
-
-function renderHero() {
-  if (!indexCache) return;
-  const heroEl = $('hero-number');
-  if (activeRange === 'all' || !indexCache.by_period?.[activeRange]) {
-    const target = indexCache.total_variants || 0;
-    if (lastHeroGene !== '__overview__') { animateNumber(heroEl, target); lastHeroGene = '__overview__'; }
-    else heroEl.textContent = fmt(target);
-    $('hero-subtitle').textContent = `${fmt(indexCache.total_reclassifications || 0)} classification changes \u00B7 ${indexCache.date_range?.from || '1965'} \u2014 ${indexCache.date_range?.to || '2026'}`;
-  } else {
-    const p = indexCache.by_period[activeRange];
-    heroEl.textContent = fmt(p.total || 0);
-    $('hero-subtitle').textContent = `${fmt(p.changes || p.reclassifications || 0)} changes in ${rangeLabel(activeRange)}`;
-  }
-}
-
-function renderTopGenes() {
-  const el = $('top-genes-section'), top = indexCache?.top_genes || [];
-  if (!top.length) { el.innerHTML = '<div class="section-title">Top Genes</div><div class="section-body"><div style="color:#94a3b8;font-size:10px;">No gene data.</div></div>'; return; }
-  const max = top[0]?.[1] || 1;
-  el.innerHTML = '<div class="section-title" onclick="toggleSection(this)">Top Genes</div><div class="section-body">' + top.slice(0, 15).map(([g, c]) =>
-    `<div class="row clickable-row" onclick="selectGene('${esc(g)}')" style="cursor:pointer;"><span class="gene">${esc(g)}</span><span class="val">${fmt(c)} variants</span></div><div class="bar" style="width:${Math.round(c/max*100)}%"></div>`
-  ).join('') + '</div>';
-}
-
-// ── Gene Selection ─────────────────────────────────────────
-window.selectGene = async function(gene) {
-  gene = gene.toUpperCase(); hideAutocomplete();
-  focusGene = gene; currentFilters.gene = gene;
-  $('search').value = gene;
-  history.replaceState(null, '', '?gene=' + encodeURIComponent(gene));
-  $('overview-mode').style.display = 'none'; $('gene-mode').style.display = ''; $('clear-btn').style.display = '';
-  renderGeneHeader(gene); renderFilterBar();
-  const geneTotal = indexCache?.gene_breakdowns?.[gene]?.total || 0;
-  const heroEl = $('hero-number');
-  if (lastHeroGene !== gene) { animateNumber(heroEl, geneTotal); lastHeroGene = gene; }
-  else heroEl.textContent = fmt(geneTotal);
-  $('hero-subtitle').textContent = `${esc(gene)} variants tracked`;
-  // Render static visualizations IMMEDIATELY from index.json (no chunk needed)
-  renderStaticClassificationBar(gene);
-  renderIdeogram('ideogram-section');
-
-  // Load chunk in background — variant list + genome browser need it
-  const chunkId = indexCache?.gene_to_chunk?.[gene];
-  $('variant-list').innerHTML = `<div style="color:#0f766e;font-size:10px;padding:8px;text-align:center;" class="loading-text">Loading ${gene} variant data...</div>`;
-
-  if (chunkId != null && !loadedChunks.has(chunkId)) {
-    showLoading(`loading ${gene} variants...`);
-    await loadChunk(chunkId);
-    hideLoading();
-  }
-
-  // After chunk: render live-computed sections
-  if (chunkId != null && loadedChunks.has(chunkId)) {
-    renderGeneHeader(gene);
-    renderVariantList();
-    renderGenomeBrowser('genome-browser', gene);
-    renderDrift(gene);
-    renderHotspots(gene);
-    renderTimeline(gene);
-    renderConcordance(gene);
-    renderSurvival(gene);
-  } else {
-    $('variant-list').innerHTML = '<div style="color:#94a3b8;font-size:10px;padding:8px;">Variant data not yet loaded. Large download required (~60 MB).</div>';
-  }
-};
-
-// Render classification bar chart from index.json (instant, no chunk needed)
-function renderStaticClassificationBar(gene) {
-  const bd = indexCache?.gene_breakdowns?.[gene];
-  if (!bd) return;
-  const total = bd.total || 1;
-  const sections = [
-    { label: 'Path', count: bd.pathogenic, color: '#dc2626' },
-    { label: 'LP', count: bd.likely_pathogenic, color: '#f59e0b' },
-    { label: 'VUS', count: bd.vus, color: '#eab308' },
-    { label: 'LB', count: bd.likely_benign, color: '#22c55e' },
-    { label: 'Ben', count: bd.benign, color: '#16a34a' },
-    { label: 'Confl', count: bd.conflicting, color: '#8b5cf6' },
-  ].filter(s => s.count > 0);
-
-  let x = 0;
-  const barSVG = sections.map(s => {
-    const w = (s.count / total) * 380;
-    const rect = `<rect x="${x + 10}" y="2" width="${Math.max(w, 1)}" height="16" rx="2" fill="${s.color}" opacity="0.85"><title>${s.label}: ${fmt(s.count)} (${(s.count/total*100).toFixed(1)}%)</title></rect>`;
-    const lbl = w > 25 ? `<text x="${x + 10 + w/2}" y="13" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">${s.label}</text>` : '';
-    x += w;
-    return rect + lbl;
-  }).join('');
-
-  const el = $('drift-section');
-  if (el) el.innerHTML = `
-    <div class="section-title">Classification Distribution</div>
-    <svg viewBox="0 0 400 22" style="width:100%;height:22px;">${barSVG}</svg>
-    <div style="font-size:8px;color:#94a3b8;margin-top:2px;">Detailed charts load with variant data</div>
-  `;
-}
-
-window.clearGene = function() {
-  focusGene = ''; currentFilters.gene = ''; $('search').value = '';
-  history.replaceState(null, '', window.location.pathname); renderOverview();
-};
-
-window.selectCondition = async function(condition) {
-  hideAutocomplete(); $('search').value = condition;
-  if (!tracker || !focusGene) return;
-  showLoading('filtering by condition...');
-  try {
-    const result = JSON.parse(tracker.filter_by_condition(condition)); hideLoading();
-    const el = $('variant-list');
-    if (!result.variants?.length) { el.innerHTML = `<div style="color:#94a3b8;font-size:10px;padding:4px 0;">No variants for "${esc(condition.substring(0,50))}".</div>`; return; }
-    el.innerHTML = `<div style="color:#8b5cf6;font-size:9px;margin-bottom:2px;">${fmt(result.variants.length)} variants</div>` + result.variants.slice(0,50).map(v => renderVariantRow(v)).join('');
-  } catch(e) { hideLoading(); }
-};
-
-async function loadChunk(id) {
-  if (loadedChunks.has(id)) return;
-  try {
-    const r = await fetch(`${DATA_BASE}/data/chunks/chunk_${String(id).padStart(2,'0')}.jsonl`);
-    if (r.ok) { tracker.load_variants(await r.text()); loadedChunks.add(id); }
-  } catch(e) { console.warn('Chunk load failed:', id, e); }
-}
-
-// ── Gene Header ────────────────────────────────────────────
-function renderGeneHeader(gene) {
-  const el = $('gene-header'); if (!el) return;
-  let g = null, source = 'index';
-  const cid = indexCache?.gene_to_chunk?.[gene];
-  if (tracker && cid != null && loadedChunks.has(cid)) {
-    try { g = JSON.parse(tracker.gene_stats(gene)); if (g?.total > 0) source = 'wasm'; else g = null; } catch(e) { g = null; }
-  }
-  if (!g) g = indexCache?.gene_breakdowns?.[gene];
-  if (!g) { el.innerHTML = `<span style="color:#94a3b8;font-size:10px;">Gene "${esc(gene)}" not found.</span>`; return; }
-  const p = (g.pathogenic||0)+(g.likely_pathogenic||0), b = (g.benign||0)+(g.likely_benign||0), total = g.total||1;
-  const src = source === 'wasm' ? '<span class="gene-source">LIVE</span>' : '';
-  el.innerHTML = `<div class="gene-header-top"><span class="gene-name">${esc(gene)}</span>${src}</div>`
-    + `<div class="gene-stats"><span class="gene-stat"><span class="badge-sm badge-path">Path</span> ${fmt(p)}</span>`
-    + `<span class="gene-stat"><span class="badge-sm badge-vus">VUS</span> ${fmt(g.vus||0)}</span>`
-    + `<span class="gene-stat"><span class="badge-sm badge-benign">Ben</span> ${fmt(b)}</span>`
-    + `<span class="gene-stat"><span class="badge-sm badge-confl">Confl</span> ${fmt(g.conflicting||0)}</span>`
-    + `<span class="gene-stat" style="color:#64748b;">Total: ${fmt(g.total||0)}</span></div>`
-    + `<div class="gene-donut">${donutSVG(p, g.vus||0, b, g.conflicting||0, total)}</div>`;
-}
-
-function donutSVG(path, vus, ben, confl, total) {
-  if (total <= 0) return '';
-  const r=16, cx=20, cy=20, sw=6, circ=2*Math.PI*r;
-  const segs = [{val:path,color:'#dc2626'},{val:vus,color:'#ca8a04'},{val:ben,color:'#16a34a'},{val:confl,color:'#d97706'}].filter(s=>s.val>0);
-  let off = 0;
-  return `<svg viewBox="0 0 40 40" style="width:36px;height:36px;">${segs.map(s => {
-    const len = (s.val/total)*circ, o = off; off += len;
-    return `<circle class="donut-segment" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="${sw}" stroke-dasharray="${len} ${circ-len}" stroke-dashoffset="${-o}"/>`;
-  }).join('')}</svg>`;
-}
-
-// ── Filter Bar + Variant List ──────────────────────────────
-function renderFilterBar() {
-  const el = $('filter-bar'); if (!el) return;
-  const chips = [[0,'Path'],[1,'LP'],[2,'VUS'],[3,'LB'],[4,'Ben'],[5,'Confl']].map(([c,l]) =>
-    `<button class="filter-chip ${currentFilters.classes.includes(c)?'active':''}" data-class="${c}" onclick="toggleClass(${c})">${l}</button>`).join('');
-  const sorts = ['date','classification','hgvs','gene'].map(s =>
-    `<button class="sort-btn ${currentFilters.sort_by===s?'active':''}" onclick="setSort('${s}')">${s.charAt(0).toUpperCase()+s.slice(1,5)}</button>`).join('');
-  el.innerHTML = `<div class="filter-chips">${chips}</div><div class="sort-controls">${sorts}</div>`;
-}
-
-window.toggleClass = function(c) {
-  const i = currentFilters.classes.indexOf(c);
-  if (i >= 0) currentFilters.classes.splice(i, 1); else currentFilters.classes.push(c);
-  renderFilterBar(); renderVariantList();
-};
-window.setSort = function(f) {
-  if (currentFilters.sort_by === f) currentFilters.sort_asc = !currentFilters.sort_asc;
-  else { currentFilters.sort_by = f; currentFilters.sort_asc = true; }
-  renderFilterBar(); renderVariantList();
-};
-
-function renderVariantList() {
-  const el = $('variant-list');
-  if (!tracker || !focusGene) { el.innerHTML = ''; return; }
-  const cid = indexCache?.gene_to_chunk?.[focusGene];
-  if (cid == null || !loadedChunks.has(cid)) { el.innerHTML = ''; return; }
-  let result;
-  try { result = JSON.parse(tracker.query(JSON.stringify({
-    gene: currentFilters.gene||focusGene, classes: currentFilters.classes,
-    date_from: currentFilters.date_from||undefined, search: currentFilters.search||undefined,
-    sort_by: currentFilters.sort_by, sort_asc: currentFilters.sort_asc,
-    limit: currentFilters.limit, offset: currentFilters.offset,
-  }))); } catch(e) { el.innerHTML = '<div style="color:#dc2626;font-size:10px;">Query error.</div>'; return; }
-  if (!result.variants?.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:10px;padding:4px 0;">No variants match filters.</div>'; return; }
-  el.innerHTML = `<div style="color:#0f766e;font-size:9px;margin-bottom:2px;">${fmt(result.filtered)} of ${fmt(result.total)} variants</div>` + result.variants.map(v => renderVariantRow(v)).join('');
-}
-
-function renderVariantRow(v) {
-  return `<div class="variant-row clickable-row" onclick="toggleCard(this)" data-variant='${esc(JSON.stringify(v))}'><span class="gene">${esc(v.gene)}</span><span class="hgvs">${esc((v.hgvs||'').substring(0,35))}</span><span class="badge-sm ${badgeClass(v.classification)}">${shortClass(v.classification)}</span></div>`;
-}
-
-window.toggleCard = function(row) {
-  const next = row.nextElementSibling;
-  if (next?.classList.contains('card-expanded')) { next.remove(); return; }
-  document.querySelectorAll('.card-expanded').forEach(c => c.remove());
-  try { const v = JSON.parse(row.dataset.variant);
-    const sc = shortClass(v.classification);
-    const cc = {'path.':'card-path','l.path.':'card-lpath','VUS':'card-vus','l.ben.':'card-lben','benign':'card-ben','confl.':'card-confl'}[sc]||'';
-    row.insertAdjacentHTML('afterend', `<div class="card-expanded"><div class="card ${cc}"><div class="card-header"><span class="card-gene">${esc(v.gene)}</span><span class="badge-sm ${badgeClass(v.classification)}">${sc}</span></div><div class="card-hgvs">${esc(v.hgvs||'')}</div><div class="card-meta"><span><span class="label">Condition:</span> ${esc((v.condition||'not provided').substring(0,40))}</span><span><span class="label">Submissions:</span> ${esc(v.submitter||'unknown')}</span><span><span class="label">Evaluated:</span> ${esc(v.last_evaluated||'\u2014')}</span><span><span class="label">Review:</span> ${esc((v.review_status||'').substring(0,25))}</span><span><a href="https://www.ncbi.nlm.nih.gov/clinvar/variation/${esc(v.variation_id)}/" target="_blank" rel="noopener" style="color:#0f766e;text-decoration:underline;font-size:9px;">ClinVar \u2192</a></span></div></div></div>`);
-  } catch(e) {}
-};
-
-// ── Time Range ─────────────────────────────────────────────
-window.setRange = function(range) {
-  activeRange = range;
-  document.querySelectorAll('.tb').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
-  if (focusGene) {
-    currentFilters.date_from = range !== 'all' ? rangeToDate(range) : '';
-    const cid = indexCache?.gene_to_chunk?.[focusGene];
-    if (range !== 'all' && tracker && cid != null && loadedChunks.has(cid)) {
-      try {
-        const result = JSON.parse(tracker.query(JSON.stringify({ gene: focusGene, date_from: rangeToDate(range), limit: 0 })));
-        const totalAll = indexCache?.gene_breakdowns?.[focusGene]?.total || 0;
-        $('hero-number').textContent = fmt(result.filtered || 0);
-        $('hero-subtitle').textContent = `${fmt(result.filtered||0)} of ${fmt(totalAll)} ${esc(focusGene)} variants (${rangeLabel(range)})`;
-      } catch(e) {
-        $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
-        $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
-      }
-    } else {
-      $('hero-number').textContent = fmt(indexCache?.gene_breakdowns?.[focusGene]?.total || 0);
-      $('hero-subtitle').textContent = `${esc(focusGene)} variants tracked`;
-    }
-    renderVariantList();
-  } else renderHero();
-};
-
-function rangeToDate(r) {
+// ── Date helpers ───────────────────────────────────────────────────────────
+function dateFrom(range) {
+  if (range === 'all') return null;
   const d = new Date();
-  if (r==='7d') d.setDate(d.getDate()-7); else if (r==='1m') d.setMonth(d.getMonth()-1);
-  else if (r==='1y') d.setFullYear(d.getFullYear()-1); else if (r==='5y') d.setFullYear(d.getFullYear()-5);
-  else return '';
-  return d.toISOString().slice(0,10);
+  if (range === '7d') d.setDate(d.getDate() - 7);
+  else if (range === '1m') d.setMonth(d.getMonth() - 1);
+  else if (range === '1y') d.setFullYear(d.getFullYear() - 1);
+  else if (range === '5y') d.setFullYear(d.getFullYear() - 5);
+  return d.toISOString().split('T')[0];
 }
-function rangeLabel(r) { return {all:'all time','5y':'5 years','1y':'1 year','1m':'1 month','7d':'7 days'}[r]||r; }
 
-// ── Autocomplete ───────────────────────────────────────────
-function onSearchInput(e) {
-  const q = e.target.value.trim().toUpperCase();
-  clearTimeout(searchTimeout);
-  if (q.length < 1) { hideAutocomplete(); return; }
-  searchTimeout = setTimeout(() => {
-    if (!indexCache?.gene_breakdowns) return;
-    const keys = Object.keys(indexCache.gene_breakdowns), gm = [], cm = [];
-    for (const g of keys) { if (g.startsWith(q)) gm.push(g); if (gm.length>=20) break; }
-    if (gm.length<20) for (const g of keys) { if (!g.startsWith(q)&&g.includes(q)) gm.push(g); if (gm.length>=20) break; }
-    if (gm.length<10 && indexCache.condition_index) {
-      const ql = q.toLowerCase();
-      for (const c of Object.keys(indexCache.condition_index)) { if (c.toLowerCase().includes(ql)) { cm.push(c); if (cm.length>=(20-gm.length)) break; } }
+// ── Number animation ───────────────────────────────────────────────────────
+function animateNumber(el, target, duration = 800) {
+  const start = parseInt(el.textContent.replace(/,/g, '')) || 0;
+  if (start === target) return;
+  const startTime = performance.now();
+  function tick(now) {
+    const p = Math.min((now - startTime) / duration, 1);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(start + (target - start) * eased).toLocaleString();
+    if (p < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+// ── Render helpers ─────────────────────────────────────────────────────────
+function h(tag, attrs = {}, children = []) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'className') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'innerHTML') el.innerHTML = v;
+    else if (k === 'disabled') { if (v) el.setAttribute('disabled', ''); else el.removeAttribute('disabled'); }
+    else el.setAttribute(k, v);
+  }
+  for (const c of (Array.isArray(children) ? children : [children])) {
+    if (c == null) continue;
+    el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  }
+  return el;
+}
+
+function clear(el) { el.innerHTML = ''; }
+
+// ── Classification colors & labels ─────────────────────────────────────────
+const CLASS_COLORS = {
+  pathogenic: '#EF4444', likely_pathogenic: '#F97316',
+  uncertain_significance: '#EAB308', likely_benign: '#22C55E', benign: '#3B82F6',
+};
+const CLASS_SHORT = {
+  pathogenic: 'Path', likely_pathogenic: 'LP',
+  uncertain_significance: 'VUS', likely_benign: 'LB', benign: 'Ben',
+};
+const CLASS_CSS = {
+  pathogenic: 'path', likely_pathogenic: 'lp',
+  uncertain_significance: 'vus', likely_benign: 'lb', benign: 'ben',
+};
+
+// ── Main render ────────────────────────────────────────────────────────────
+function render() {
+  const app = document.getElementById('app');
+  const prevScroll = app.querySelector('.widget')?.scrollTop || 0;
+  clear(app);
+  const widget = h('div', { className: 'widget' });
+
+  // Header
+  widget.appendChild(renderHeader());
+
+  // Search
+  widget.appendChild(renderSearch());
+
+  if (state.mode === 'overview') {
+    widget.appendChild(renderOverview());
+  } else {
+    widget.appendChild(renderGeneDetail());
+  }
+
+  // Footer
+  widget.appendChild(h('div', { className: 'widget-footer' }, [
+    h('div', {}, [
+      h('span', {}, 'Auto-updates daily from '),
+      h('a', { href: 'https://www.ncbi.nlm.nih.gov/clinvar/', target: '_blank' }, 'ClinVar'),
+      h('span', {}, ', '),
+      h('a', { href: 'https://hpo.jax.org/', target: '_blank' }, 'HPO'),
+      h('span', {}, ', '),
+      h('a', { href: 'https://omim.org/', target: '_blank' }, 'OMIM'),
+    ]),
+    h('div', { style: { marginTop: '2px' } }, [
+      h('span', {}, 'Powered by '),
+      h('a', { href: 'https://github.com/schlein-lab', target: '_blank' }, 'nano-zyrkel'),
+      h('span', {}, ' \u00B7 '),
+      h('a', { href: 'https://zyrkel.com', target: '_blank' }, 'zyrkel.com'),
+    ]),
+  ]));
+
+  app.appendChild(widget);
+  if (prevScroll) widget.scrollTop = prevScroll;
+}
+
+function renderHeader() {
+  const banner = h('div', { className: 'widget-banner' }, [
+    h('img', { src: 'header.png', alt: '', className: 'banner-img' }),
+    h('div', { className: 'banner-overlay' }, [
+      h('div', { className: 'banner-title' }, 'VUS Tracker'),
+      h('div', { className: 'banner-subtitle' }, 'Variant Intelligence Platform'),
+    ]),
+  ]);
+  const logo = h('div', { className: 'widget-logo' }, [
+    h('span', { style: { fontSize: '10px', color: 'var(--text-secondary)' } }, 'Powered by nano-zyrkel'),
+  ]);
+  const actions = h('div', { className: 'header-actions' });
+
+  if (state.mode === 'gene' && state.variants.length > 0) {
+    const csvBtn = h('button', {
+      className: 'icon-btn', title: 'Export CSV',
+      onClick: () => exportData('csv'),
+      innerHTML: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+    });
+    const tsvBtn = h('button', {
+      className: 'icon-btn', title: 'Export TSV',
+      onClick: () => exportData('tsv'),
+      innerHTML: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>',
+    });
+    actions.appendChild(csvBtn);
+    actions.appendChild(tsvBtn);
+  }
+
+  const hdr = h('div', { className: 'widget-header' });
+  hdr.appendChild(banner);
+  const bottomRow = h('div', { className: 'header-bottom' });
+  bottomRow.appendChild(logo);
+  bottomRow.appendChild(actions);
+  hdr.appendChild(bottomRow);
+  return hdr;
+}
+
+// ── Search ─────────────────────────────────────────────────────────────────
+function renderSearch() {
+  const outer = h('div');
+
+  // Search mode toggle
+  const modeRow = h('div', { className: 'search-mode-toggle' });
+  const geneBtn = h('button', {
+    className: `search-mode-btn${state.searchMode === 'gene' ? ' active' : ''}`,
+    onClick: () => { state.searchMode = 'gene'; state.phenotypeResults = null; state.phenotypeGenes = null; state.selectedHpoTerms = []; render(); },
+  }, 'Gene');
+  const phenoBtn = h('button', {
+    className: `search-mode-btn${state.searchMode === 'phenotype' ? ' active' : ''}`,
+    onClick: () => { state.searchMode = 'phenotype'; state.searchResults = null; render(); },
+  }, 'Phenotype');
+  modeRow.appendChild(geneBtn);
+  modeRow.appendChild(phenoBtn);
+
+  const wrap = h('div', { className: 'search-wrap' });
+  const icon = h('span', { className: 'search-icon', innerHTML: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' });
+  const placeholder = state.searchMode === 'gene' ? 'Gene symbol (e.g. BRCA2, RYR2, SCN5A)' : 'Phenotype (e.g. telecanthus, ptosis, microcephaly)';
+  const dropdown = h('div', { className: 'search-dropdown' });
+  const input = h('input', {
+    className: 'search-input', type: 'text', placeholder,
+    onInput: (e) => {
+      if (state.searchMode === 'gene') handleSearch(e.target.value, dropdown);
+      else handlePhenotypeSearch(e.target.value, dropdown);
+    },
+    onFocus: () => { if (state.searchResults || state.phenotypeResults) dropdown.classList.add('open'); },
+    onBlur: () => { setTimeout(() => dropdown.classList.remove('open'), 200); },
+  });
+  wrap.appendChild(icon);
+  wrap.appendChild(input);
+  wrap.appendChild(dropdown);
+  outer.appendChild(wrap);
+  outer.appendChild(modeRow);
+
+  // Show selected HPO terms and gene results
+  if (state.searchMode === 'phenotype') {
+    if (state.selectedHpoTerms.length > 0) {
+      const tagsRow = h('div', { className: 'hpo-tags' });
+      for (const term of state.selectedHpoTerms) {
+        const tag = h('span', { className: 'hpo-tag' }, [
+          h('span', {}, `${term.name} (${term.hpo_id})`),
+          h('span', { className: 'hpo-tag-remove', onClick: () => {
+            state.selectedHpoTerms = state.selectedHpoTerms.filter(t => t.hpo_id !== term.hpo_id);
+            if (state.selectedHpoTerms.length > 0) loadPhenotypeGenes();
+            else { state.phenotypeGenes = null; render(); }
+          }}, ' \u00D7'),
+        ]);
+        tagsRow.appendChild(tag);
+      }
+      outer.appendChild(tagsRow);
     }
-    showAutocomplete(gm, cm);
-  }, 200);
+    if (state.phenotypeGenes && state.phenotypeGenes.length > 0) {
+      const geneList = h('div', { className: 'pheno-gene-list' });
+      // Clear back button
+      geneList.appendChild(h('button', {
+        className: 'back-btn', style: { marginBottom: '6px' },
+        onClick: () => { state.selectedHpoTerms = []; state.phenotypeGenes = null; render(); },
+      }, '\u2190 Back to Top Phenotypes'));
+      geneList.appendChild(h('div', { className: 'gene-list-title' }, `${state.phenotypeGenes.length} genes matching phenotype`));
+      for (const g of state.phenotypeGenes.slice(0, 20)) {
+        const diseases = (g.diseases || []).slice(0, 3).map(d =>
+          h('a', { href: d.startsWith('OMIM:') ? `https://omim.org/entry/${d.replace('OMIM:', '')}` : d.startsWith('ORPHA:') ? `https://www.orpha.net/en/disease/detail/${d.replace('ORPHA:', '')}` : '#', target: '_blank', className: 'pheno-link', style: { fontSize: '10px' } }, d)
+        );
+        const row = h('div', { className: 'gene-row', onClick: () => selectGene(g.gene_symbol) }, [
+          h('span', { className: 'gene-name' }, g.gene_symbol),
+          h('span', { className: 'gene-vus-count' }, `${g.match_count || 0}/${state.selectedHpoTerms.length}`),
+          h('span', { className: 'pheno-diseases' }, diseases),
+        ]);
+        geneList.appendChild(row);
+      }
+      outer.appendChild(geneList);
+    } else if (state.phenotypeGenes !== null && state.phenotypeGenes.length === 0) {
+      outer.appendChild(h('button', {
+        className: 'back-btn', style: { marginBottom: '6px' },
+        onClick: () => { state.selectedHpoTerms = []; state.phenotypeGenes = null; render(); },
+      }, '\u2190 Back to Top Phenotypes'));
+      outer.appendChild(h('div', { className: 'empty-state' }, 'No genes found for selected phenotypes'));
+    }
+  }
+
+  return outer;
 }
 
-function onSearchKeydown(e) {
-  const items = $('autocomplete').querySelectorAll('.ac-item');
-  if (!items.length) return;
-  if (e.key==='ArrowDown') { e.preventDefault(); acIndex=Math.min(acIndex+1,items.length-1); items.forEach((el,i)=>el.classList.toggle('selected',i===acIndex)); }
-  else if (e.key==='ArrowUp') { e.preventDefault(); acIndex=Math.max(acIndex-1,0); items.forEach((el,i)=>el.classList.toggle('selected',i===acIndex)); }
-  else if (e.key==='Enter') { e.preventDefault(); const sel=(acIndex>=0&&items[acIndex])?items[acIndex]:(items.length===1?items[0]:null); if(sel){if(sel.dataset.condition)selectCondition(sel.dataset.condition);else if(sel.dataset.gene)selectGene(sel.dataset.gene);} }
-  else if (e.key==='Escape') hideAutocomplete();
-}
-
-function showAutocomplete(genes, conds) {
-  const ac = $('autocomplete'); acIndex = -1; conds = conds||[];
-  if (!genes.length && !conds.length) { ac.innerHTML = '<div class="ac-item" style="color:#94a3b8;pointer-events:none">No genes found</div>'; ac.classList.add('visible'); return; }
-  let h = genes.map(g => { const bd=indexCache.gene_breakdowns[g]; return `<div class="ac-item" data-gene="${esc(g)}" onclick="selectGene('${esc(g)}')"><span>${esc(g)}</span><span class="ac-count">${fmt(bd?.total||0)}</span></div>`; }).join('');
-  if (conds.length) h += conds.map(c => `<div class="ac-item" data-condition="${esc(c)}" onclick="selectCondition('${esc(c)}')" style="border-left:2px solid #8b5cf6;"><span style="font-size:9px;color:#8b5cf6;">\u25C6</span> <span style="font-size:10px;">${esc(c.substring(0,50))}</span><span class="ac-count">${indexCache.condition_index[c]?.length||0} genes</span></div>`).join('');
-  ac.innerHTML = h; ac.classList.add('visible');
-}
-function hideAutocomplete() { $('autocomplete').classList.remove('visible'); acIndex = -1; }
-
-// ── Visualizations ─────────────────────────────────────────
-function renderDrift(gene) {
-  const el = $('drift-section');
-  if (!el||!tracker||!loadedChunks.size) { if(el) el.innerHTML=''; return; }
-  let data; try { data = JSON.parse(tracker.classification_drift(gene)); } catch(e) { el.innerHTML=''; return; }
-  if (!data.snapshots?.length || data.snapshots.length<2) { el.innerHTML=''; return; }
-  const snaps=data.snapshots, n=snaps.length, w=400, h=80, xStep=(w-20)/(n-1), pts=[];
-  for (let i=0;i<n;i++) { const s=snaps[i], t=(s.path||0)+(s.vus||0)+(s.ben||0), x=10+i*xStep;
-    if(!t){pts.push({x,pY:h-10,vY:h-10});continue;} const aH=h-20; pts.push({x,pY:10+(1-(s.path||0)/t)*aH,vY:10+(1-(s.path||0)/t-(s.vus||0)/t)*aH}); }
-  const area=(up,lo)=>up.map((v,i)=>`${pts[i].x},${v}`).join(' ')+' '+[...lo].reverse().map((v,i)=>`${pts[n-1-i].x},${v}`).join(' ');
-  const labels=`<text x="10" y="${h-1}" fill="#64748b" font-size="9">${snaps[0].month}</text><text x="${w/2}" y="${h-1}" text-anchor="middle" fill="#64748b" font-size="9">${snaps[Math.floor(n/2)].month}</text><text x="${w-10}" y="${h-1}" text-anchor="end" fill="#64748b" font-size="9">${snaps[n-1].month}</text>`;
-  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Classification Drift</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><polygon points="${area(pts.map(p=>10),pts.map(p=>p.vY))}" fill="#0f766e" opacity="0.6"/><polygon points="${area(pts.map(p=>p.vY),pts.map(p=>p.pY))}" fill="#d97706" opacity="0.6"/><polygon points="${area(pts.map(p=>p.pY),pts.map(()=>h-10))}" fill="#dc2626" opacity="0.6"/>${labels}<text x="${w-10}" y="8" text-anchor="end" fill="#64748b" font-size="9"><tspan fill="#dc2626">\u25CF</tspan> path <tspan fill="#d97706">\u25CF</tspan> VUS <tspan fill="#0f766e">\u25CF</tspan> ben</text></svg></div>`;
-}
-
-function renderHotspots(gene) {
-  const el = $('hotspot-section');
-  if (!el||!tracker||!loadedChunks.size) { if(el) el.innerHTML=''; return; }
-  let data; try { data = JSON.parse(tracker.detect_hotspots(gene, 500)); } catch(e) { el.innerHTML=''; return; }
-  if (!data.length) { el.innerHTML=''; return; }
-  const minP=Math.min(...data.map(d=>d.start)), maxP=Math.max(...data.map(d=>d.end)), span=maxP-minP||1, w=400, h=40;
-  const blocks = data.map(d => { const x=((d.start-minP)/span)*(w-20)+10, bw=Math.max(2,((d.end-d.start)/span)*(w-20)), pf=d.total?(d.pathogenic||0)/d.total:0;
-    return `<rect x="${x}" y="8" width="${bw}" height="20" rx="2" fill="rgb(${Math.round(100+pf*155)},${Math.round(60-pf*40)},${Math.round(60-pf*40)})" opacity="0.85"><title>${d.region||''}: ${d.total} variants (${d.pathogenic||0} path.)</title></rect>`; }).join('');
-  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Hotspot Map</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet"><rect x="10" y="16" width="${w-20}" height="4" rx="2" fill="#e2e8f0"/>${blocks}<text x="10" y="${h-2}" fill="#64748b" font-size="9">${minP.toLocaleString()}</text><text x="${w-10}" y="${h-2}" text-anchor="end" fill="#64748b" font-size="9">${maxP.toLocaleString()}</text></svg></div>`;
-}
-
-function renderTimeline(gene) {
-  const el = $('timeline-section');
-  if (!el||!tracker) { if(el) el.innerHTML=''; return; }
-  let tl; try { tl = JSON.parse(tracker.submissions_timeline(gene)); } catch(e) { el.innerHTML=''; return; }
-  const months = tl?.months; if (!months||!Object.keys(months).length) { el.innerHTML=''; return; }
-  const keys=Object.keys(months).sort(), n=keys.length, w=400, h=80, pad={l:30,r:5,t:5,b:18}, pw=w-pad.l-pad.r, ph=h-pad.t-pad.b;
-  const cats = keys.map(k => { const m=months[k]; return { p:(m['path.']||0)+(m['l.path.']||0)+(m['Pathogenic']||0)+(m['Likely pathogenic']||0), v:(m['VUS']||0)+(m['Uncertain significance']||0), b:(m['benign']||0)+(m['l.ben.']||0)+(m['Benign']||0)+(m['Likely benign']||0) }; });
-  cats.forEach(c => c.total = c.p+c.v+c.b);
-  const maxY=Math.max(1,...cats.map(c=>c.total)), xAt=i=>pad.l+(i/Math.max(1,n-1))*pw, yAt=v=>pad.t+ph-(v/maxY)*ph;
-  const ap=(up,lo)=>'M'+up.map((v,i)=>`${xAt(i)},${yAt(v)}`).join(' L')+' L'+[...lo].reverse().map((v,i)=>`${xAt(n-1-i)},${yAt(v)}`).join(' L')+' Z';
-  const step=Math.max(1,Math.floor(n/5));
-  const labels=keys.filter((_,i)=>i%step===0||i===n-1).map(k=>`<text x="${xAt(keys.indexOf(k))}" y="${h-2}" text-anchor="middle" fill="#64748b" font-size="9">${k.slice(2,7)}</text>`).join('');
-  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">Submissions Timeline</div><div class="section-body collapsed"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:80px;" preserveAspectRatio="none"><path d="${ap(cats.map(c=>c.b),cats.map(()=>0))}" fill="#16a34a" opacity="0.5"/><path d="${ap(cats.map(c=>c.b+c.v),cats.map(c=>c.b))}" fill="#eab308" opacity="0.5"/><path d="${ap(cats.map(c=>c.total),cats.map(c=>c.b+c.v))}" fill="#dc2626" opacity="0.5"/>${labels}<text x="${pad.l-3}" y="${pad.t+4}" text-anchor="end" fill="#64748b" font-size="9">${maxY}</text><text x="${pad.l-3}" y="${yAt(0)+1}" text-anchor="end" fill="#64748b" font-size="9">0</text></svg></div>`;
-}
-
-function renderConcordance(gene) {
-  const el = $('concordance-section');
-  if (!el||!tracker||!loadedChunks.size) { if(el) el.innerHTML=''; return; }
-  let data; try { data = JSON.parse(tracker.concordance_analysis(gene)); } catch(e) { el.innerHTML=''; return; }
-  if (!data.length) { el.innerHTML=''; return; }
-  const rows = data.slice(0,20).map(r => { const s=r.discordance_score||0, bW=Math.round(s*60), red=Math.round(s*220+35), grn=Math.round((1-s)*180+40);
-    return `<tr><td style="font-size:9px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(r.hgvs)}">${esc(r.hgvs)}</td><td><span class="badge-sm ${badgeClass(r.classification)}">${esc(r.classification)}</span></td><td style="font-size:8px;color:#64748b;">${esc(r.submitter)}</td><td><svg width="64" height="10" style="vertical-align:middle;"><rect x="0" y="1" width="${bW}" height="8" rx="2" fill="rgb(${red},${grn},60)"/><rect x="0" y="1" width="60" height="8" rx="2" fill="none" stroke="#e2e8f0" stroke-width="0.5"/></svg></td></tr>`; }).join('');
-  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">Submitter Concordance</div><div class="section-body collapsed"><table style="width:100%;border-collapse:collapse;font-size:9px;"><thead><tr style="color:#94a3b8;text-align:left;"><th>Variant</th><th>Class</th><th>Submitters</th><th>Discordance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-}
-
-function renderSurvival(gene) {
-  const el = $('survival-section');
-  if (!el||!tracker) { if(el) el.innerHTML=''; return; }
-  let curve; try { curve = JSON.parse(tracker.vus_survival_curve(gene)); } catch(e) { el.innerHTML=''; return; }
-  const pts = curve.points||curve; if (!pts?.length) { el.innerHTML=''; return; }
-  const w=400, h=100, pad={l:30,r:10,t:10,b:20}, pw=w-pad.l-pad.r, ph=h-pad.t-pad.b;
-  const maxX=Math.max(1,pts[pts.length-1].days||pts[pts.length-1].x||1);
-  const xAt=d=>pad.l+(d/maxX)*pw, yAt=f=>pad.t+ph-f*ph;
-  const line=pts.map(p=>`${xAt(p.days??p.x)},${yAt(p.fraction??p.y)}`).join(' L');
-  const circles=pts.filter((_,i)=>i%Math.max(1,Math.floor(pts.length/20))===0).map(p=>{const d=p.days??p.x,f=p.fraction??p.y;return `<circle cx="${xAt(d)}" cy="${yAt(f)}" r="3" fill="#0f766e" opacity="0"><title>Day ${d}: ${(f*100).toFixed(1)}% still VUS</title></circle><circle cx="${xAt(d)}" cy="${yAt(f)}" r="8" fill="transparent"><title>Day ${d}: ${(f*100).toFixed(1)}% still VUS</title></circle>`;}).join('');
-  const xL=[0,Math.round(maxX/2),maxX].map(d=>`<text x="${xAt(d)}" y="${h-3}" text-anchor="middle" fill="#64748b" font-size="9">${d}d</text>`).join('');
-  const yL=[0,0.5,1].map(f=>`<text x="${pad.l-3}" y="${yAt(f)+2}" text-anchor="end" fill="#64748b" font-size="9">${f}</text>`).join('');
-  const grid=[0.25,0.5,0.75].map(f=>`<line x1="${pad.l}" y1="${yAt(f)}" x2="${w-pad.r}" y2="${yAt(f)}" stroke="#f1f5f9" stroke-width="0.5"/>`).join('');
-  el.innerHTML = `<div class="section-title collapsed" onclick="toggleSection(this)">VUS Survival Curve</div><div class="section-body collapsed"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100px;">${grid}<polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="1.5"/>${circles}${xL}${yL}<text x="${w/2}" y="${h}" text-anchor="middle" fill="#64748b" font-size="9">days since VUS submission</text></svg></div>`;
-}
-
-function renderGenomeBrowser(containerId, gene) {
-  const el = document.getElementById(containerId);
-  if (!el || !tracker || !focusGene) { if (el) el.innerHTML = ''; return; }
-
-  // Get all variants for this gene with positions
-  let result;
-  try {
-    result = JSON.parse(tracker.query(JSON.stringify({
-      gene: gene, limit: 5000, sort_by: 'position', sort_asc: true
-    })));
-  } catch(e) { el.innerHTML = ''; return; }
-  const variants = (result.variants || []).filter(v => v.pos > 0);
-  if (!variants.length) { el.innerHTML = '<div style="color:#94a3b8;font-size:9px">No genomic coordinates available</div>'; return; }
-
-  // Determine genomic range
-  const minPos = variants[0].pos;
-  const maxPos = variants[variants.length - 1].pos;
-  const span = maxPos - minPos || 1;
-  const chrom = variants[0].chrom || '?';
-
-  // State for zoom/pan
-  let viewStart = minPos - span * 0.05;
-  let viewEnd = maxPos + span * 0.05;
-
-  function render() {
-    const viewSpan = viewEnd - viewStart;
-    const w = 400, h = 70;
-
-    const classColor = (c) => {
-      const s = shortClass(c);
-      if (s.includes('path')) return '#dc2626';
-      if (s === 'VUS') return '#eab308';
-      if (s.includes('ben')) return '#16a34a';
-      if (s.includes('confl')) return '#8b5cf6';
-      return '#94a3b8';
-    };
-
-    const toX = (pos) => ((pos - viewStart) / viewSpan) * w;
-
-    let variantSVG = '';
-    const visible = variants.filter(v => v.pos >= viewStart && v.pos <= viewEnd);
-
-    if (visible.length > 200) {
-      // Density heatmap mode
-      const bins = new Array(w).fill(null).map(() => ({path:0, vus:0, ben:0, total:0}));
-      for (const v of visible) {
-        const x = Math.floor(toX(v.pos));
-        if (x >= 0 && x < w) {
-          bins[x].total++;
-          const s = shortClass(v.classification);
-          if (s.includes('path')) bins[x].path++;
-          else if (s === 'VUS') bins[x].vus++;
-          else bins[x].ben++;
+async function handleSearch(query, dropdown) {
+  clearTimeout(state.searchTimeout);
+  if (query.length < 2) {
+    dropdown.classList.remove('open');
+    state.searchResults = null;
+    return;
+  }
+  state.searchTimeout = setTimeout(async () => {
+    try {
+      const res = await api('/search', { q: query });
+      state.searchResults = res.data;
+      clear(dropdown);
+      const genes = res.data.genes || [];
+      if (genes.length === 0) {
+        dropdown.appendChild(h('div', { className: 'empty-state' }, 'No results'));
+      } else {
+        for (const g of genes.slice(0, 8)) {
+          const row = h('div', { className: 'search-item', onClick: () => selectGene(g.symbol) }, [
+            h('span', { className: 'gene-sym' }, g.symbol),
+            h('span', { className: 'gene-count' }, `${g.vus_count || g.total_variants || 0} variants`),
+          ]);
+          dropdown.appendChild(row);
         }
       }
-      for (let x = 0; x < w; x++) {
-        if (bins[x].total === 0) continue;
-        const intensity = Math.min(bins[x].total / 5, 1);
-        const mainColor = bins[x].path > bins[x].vus ? '#dc2626' : bins[x].vus > bins[x].ben ? '#eab308' : '#16a34a';
-        variantSVG += `<rect x="${x}" y="${20}" width="1" height="${30 * intensity + 5}" fill="${mainColor}" opacity="${0.3 + intensity * 0.7}"><title>${bins[x].total} variants at chr${chrom}:${Math.round(viewStart + (x/w)*viewSpan)}</title></rect>`;
-      }
-    } else {
-      // Lollipop mode
-      for (const v of visible) {
-        const x = toX(v.pos).toFixed(1);
-        const color = classColor(v.classification);
-        const sc = shortClass(v.classification);
-        variantSVG += `<line x1="${x}" y1="50" x2="${x}" y2="25" stroke="${color}" stroke-width="1" opacity="0.6"/>`;
-        variantSVG += `<circle cx="${x}" cy="22" r="3" fill="${color}" opacity="0.8"><title>${v.gene} ${v.hgvs} (${sc})\nchr${chrom}:${v.pos}</title></circle>`;
-      }
+      dropdown.classList.add('open');
+    } catch (e) {
+      console.error('Search error:', e);
     }
+  }, 300);
+}
 
-    // Axis ticks
-    const ticks = 5;
-    let axisSVG = '';
-    for (let i = 0; i <= ticks; i++) {
-      const pos = viewStart + (viewSpan * i / ticks);
-      const x = (i / ticks) * w;
-      const label = pos >= 1e6 ? (pos/1e6).toFixed(2) + 'M' : pos >= 1e3 ? (pos/1e3).toFixed(0) + 'K' : pos.toFixed(0);
-      axisSVG += `<line x1="${x}" y1="55" x2="${x}" y2="58" stroke="#cbd5e1" stroke-width="0.5"/>`;
-      axisSVG += `<text x="${x}" y="66" text-anchor="middle" fill="#64748b" font-size="7">${label}</text>`;
-    }
-
-    // Navigation controls
-    const controls = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-        <span style="font-size:8px;color:#64748b;">chr${chrom}:${Math.round(viewStart)}\u2013${Math.round(viewEnd)} (${visible.length} variants)</span>
-        <span style="display:flex;gap:2px;">
-          <button onclick="browserZoom(0.5)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">+</button>
-          <button onclick="browserZoom(2)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2212</button>
-          <button onclick="browserPan(-0.3)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2190</button>
-          <button onclick="browserPan(0.3)" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u2192</button>
-          <button onclick="browserReset()" style="font-size:9px;padding:1px 4px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;cursor:pointer;">\u27F2</button>
-        </span>
-      </div>
-    `;
-
-    // Gene track bar
-    const geneBar = `<rect x="0" y="12" width="${w}" height="4" rx="2" fill="#e2e8f0"/>
-      <rect x="${toX(minPos)}" y="12" width="${Math.max(toX(maxPos) - toX(minPos), 2)}" height="4" rx="2" fill="#0f766e" opacity="0.3"/>
-      <text x="${toX(minPos)}" y="9" fill="#0f766e" font-size="8" font-weight="600">${gene}</text>`;
-
-    el.innerHTML = controls + `
-      <svg viewBox="0 0 ${w} 70" style="width:100%;height:70px;">
-        ${geneBar}
-        ${variantSVG}
-        <line x1="0" y1="55" x2="${w}" y2="55" stroke="#e2e8f0" stroke-width="0.5"/>
-        ${axisSVG}
-      </svg>
-    `;
+async function handlePhenotypeSearch(query, dropdown) {
+  clearTimeout(state.searchTimeout);
+  if (query.length < 2) {
+    dropdown.classList.remove('open');
+    state.phenotypeResults = null;
+    return;
   }
+  state.searchTimeout = setTimeout(async () => {
+    try {
+      const res = await api('/phenotype/search', { q: query });
+      state.phenotypeResults = res.data || [];
+      clear(dropdown);
+      if (state.phenotypeResults.length === 0) {
+        dropdown.appendChild(h('div', { className: 'empty-state' }, 'No phenotypes found'));
+      } else {
+        for (const p of state.phenotypeResults.slice(0, 8)) {
+          const row = h('div', { className: 'search-item', onClick: () => {
+            if (!state.selectedHpoTerms.find(t => t.hpo_id === p.hpo_id)) {
+              state.selectedHpoTerms.push(p);
+              loadPhenotypeGenes();
+            }
+            dropdown.classList.remove('open');
+          }}, [
+            h('span', { className: 'gene-sym' }, p.hpo_id),
+            h('span', { className: 'gene-count' }, p.name),
+            h('span', { className: 'gene-count' }, `${p.gene_count || 0} genes`),
+          ]);
+          dropdown.appendChild(row);
+        }
+      }
+      dropdown.classList.add('open');
+    } catch (e) {
+      console.error('Phenotype search error:', e);
+    }
+  }, 300);
+}
 
-  // Zoom/Pan controls
-  window.browserZoom = function(factor) {
-    const center = (viewStart + viewEnd) / 2;
-    const halfSpan = ((viewEnd - viewStart) / 2) * factor;
-    viewStart = center - halfSpan;
-    viewEnd = center + halfSpan;
-    render();
-  };
-
-  window.browserPan = function(fraction) {
-    const shift = (viewEnd - viewStart) * fraction;
-    viewStart += shift;
-    viewEnd += shift;
-    render();
-  };
-
-  window.browserReset = function() {
-    viewStart = minPos - span * 0.05;
-    viewEnd = maxPos + span * 0.05;
-    render();
-  };
-
-  // Mouse wheel zoom
-  el.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const factor = e.deltaY > 0 ? 1.3 : 0.7;
-    const rect = el.querySelector('svg')?.getBoundingClientRect();
-    if (!rect) return;
-    const mouseX = (e.clientX - rect.left) / rect.width;
-    const mousePos = viewStart + mouseX * (viewEnd - viewStart);
-    viewStart = mousePos - (mousePos - viewStart) * factor;
-    viewEnd = mousePos + (viewEnd - mousePos) * factor;
-    render();
-  }, { passive: false });
-
+async function handlePhenotypeSearchDirect(query) {
+  try {
+    const res = await api('/phenotype/search', { q: query });
+    const results = res.data || [];
+    if (results.length > 0) {
+      const term = results[0];
+      if (!state.selectedHpoTerms.find(t => t.hpo_id === term.hpo_id)) {
+        state.selectedHpoTerms.push(term);
+        loadPhenotypeGenes();
+      }
+    }
+  } catch (e) { console.error('Direct phenotype search error:', e); }
   render();
 }
 
-function renderIdeogram() {
-  const el = $('ideogram-section'); if (!el) return;
-  const bins = indexCache?.chromosome_bins; if (!bins) { el.innerHTML=''; return; }
-  const cL={chr1:248,chr2:242,chr3:198,chr4:190,chr5:181,chr6:170,chr7:159,chr8:145,chr9:138,chr10:133,chr11:135,chr12:133,chr13:114,chr14:107,chr15:101,chr16:90,chr17:83,chr18:80,chr19:58,chr20:64,chr21:46,chr22:50,chrX:156,chrY:57};
-  const chrOrder=Object.keys(cL), maxLen=248, w=400, h=120, barW=12, gap=(w-10)/chrOrder.length;
-  let maxCount=1; for (const chr of chrOrder) { const cb=bins[chr]; if(cb) Object.values(cb).forEach(v=>{if(v>maxCount)maxCount=v;}); }
-  const elems = chrOrder.map((chr,i) => { const x=5+i*gap, chrH=(cL[chr]/maxLen)*(h-30), y0=h-16-chrH, cb=bins[chr]||{};
-    let p=`<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" rx="3" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="0.5"/>`;
-    for (const pos of Object.keys(cb).map(Number).sort((a,b)=>a-b)) { const c=cb[pos],f=c/maxCount,by=y0+(pos/(cL[chr]*1e6||1))*chrH,bh=Math.max(1,(1/(cL[chr]||1))*chrH);
-      p+=`<rect x="${x}" y="${by}" width="${barW}" height="${bh}" fill="rgb(${15-Math.round(f*15)},${118-Math.round(f*48)},${110-Math.round(f*40)})" opacity="${0.3+f*0.7}"><title>${chr}:${pos} \u2014 ${c} variants</title></rect>`; }
-    return p+`<rect x="${x}" y="${y0}" width="${barW}" height="${chrH}" fill="transparent" style="cursor:pointer;" onclick="zoomChromosome('${chr}')"/><text x="${x+barW/2}" y="${h-4}" text-anchor="middle" fill="#64748b" font-size="9" style="cursor:pointer;" onclick="zoomChromosome('${chr}')">${chr.replace('chr','')}</text>`; }).join('');
-  el.innerHTML = `<div class="section-title" onclick="toggleSection(this)">Chromosome Ideogram</div><div class="section-body"><svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;cursor:pointer;" preserveAspectRatio="xMinYMin meet">${elems}</svg><div id="ideogram-zoom" style="display:none;margin-top:4px;"></div></div>`;
+async function loadPhenotypeGenes() {
+  if (state.selectedHpoTerms.length === 0) { state.phenotypeGenes = null; render(); return; }
+  try {
+    const hpoIds = state.selectedHpoTerms.map(t => t.hpo_id).join(',');
+    const res = await api('/phenotype/genes', { hpo: hpoIds });
+    state.phenotypeGenes = res.data || [];
+  } catch (e) {
+    console.error('Phenotype genes error:', e);
+    state.phenotypeGenes = [];
+  }
+  render();
 }
 
-window.zoomChromosome = function(chr) {
-  const el = document.getElementById('ideogram-zoom');
-  if (!el || !indexCache?.chromosome_bins) return;
-  const cb = indexCache.chromosome_bins[chr];
-  if (!cb || !Object.keys(cb).length) { el.style.display='none'; return; }
+// ── Overview Mode ──────────────────────────────────────────────────────────
+function renderOverview() {
+  const container = h('div');
 
-  // If already showing this chromosome, toggle off
-  if (el.dataset.chr === chr) { el.style.display='none'; el.dataset.chr=''; return; }
-  el.dataset.chr = chr;
-  el.style.display = 'block';
+  // Big stat
+  const statBox = h('div', { className: 'big-stat' });
+  const numEl = h('div', { className: 'big-number animate-in' }, '0');
+  const subEl = h('div', { className: 'big-subtitle' });
 
-  const cL={chr1:248,chr2:242,chr3:198,chr4:190,chr5:181,chr6:170,chr7:159,chr8:145,chr9:138,chr10:133,chr11:135,chr12:133,chr13:114,chr14:107,chr15:101,chr16:90,chr17:83,chr18:80,chr19:58,chr20:64,chr21:46,chr22:50,chrX:156,chrY:57};
-  const chrLen = (cL[chr] || 100) * 1e6;
-  const positions = Object.keys(cb).map(Number).sort((a,b) => a - b);
-  const w = 400, h = 50, pad = 10;
-
-  let maxCount = 1;
-  for (const p of positions) { if (cb[p] > maxCount) maxCount = cb[p]; }
-
-  // Draw expanded chromosome with density bars
-  const toX = (pos) => pad + ((pos / chrLen) * (w - 2 * pad));
-  let bars = '';
-  for (const pos of positions) {
-    const x = toX(pos);
-    const count = cb[pos];
-    const f = count / maxCount;
-    const barH = 4 + f * 26;
-    bars += `<rect x="${x - 1}" y="${30 - barH}" width="3" height="${barH}" rx="1" fill="rgb(${15 + Math.round(f * 200)},${118 - Math.round(f * 80)},${110 - Math.round(f * 70)})" opacity="${0.4 + f * 0.6}"><title>${chr}:${pos.toLocaleString()} \u2014 ${count} variants</title></rect>`;
+  if (state.stats) {
+    subEl.appendChild(h('strong', {}, (state.stats.total_reclassifications || 0).toLocaleString()));
+    subEl.appendChild(document.createTextNode(' reclassifications across '));
+    subEl.appendChild(h('strong', {}, (state.stats.total_genes || 0).toLocaleString()));
+    subEl.appendChild(document.createTextNode(' genes'));
   }
 
-  // Axis labels
-  const axisLabels = [0, 0.25, 0.5, 0.75, 1].map(frac => {
-    const pos = Math.round(chrLen * frac);
-    const x = pad + frac * (w - 2 * pad);
-    const label = pos >= 1e6 ? (pos/1e6).toFixed(0) + 'M' : (pos/1e3).toFixed(0) + 'K';
-    return `<text x="${x}" y="${h - 2}" text-anchor="middle" fill="#64748b" font-size="8">${label}</text>`;
-  }).join('');
+  statBox.appendChild(numEl);
+  statBox.appendChild(subEl);
+  container.appendChild(statBox);
 
-  el.innerHTML = `<div style="font-size:9px;color:#0f766e;font-weight:600;margin-bottom:2px;">${chr} expanded <span style="color:#94a3b8;font-weight:normal;cursor:pointer;" onclick="document.getElementById('ideogram-zoom').style.display='none';document.getElementById('ideogram-zoom').dataset.chr='';">\u2715</span></div>
-    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="xMinYMin meet">
-      <rect x="${pad}" y="28" width="${w - 2*pad}" height="4" rx="2" fill="#e2e8f0"/>
-      ${bars}
-      <line x1="${pad}" y1="35" x2="${w - pad}" y2="35" stroke="#e2e8f0" stroke-width="0.5"/>
-      ${axisLabels}
-    </svg>`;
-};
-
-// ── Report Date ────────────────────────────────────────────
-function onReportDate(e) {
-  const date=e.target.value; if (!date||!tracker) return;
-  const gene=currentFilters.gene||focusGene||'';
-  let result; try { result = JSON.parse(tracker.changes_since(gene, date)); } catch(e) { return; }
-  const el=$('variant-list'), gl=gene||'all genes';
-  if (result.total===0) { el.innerHTML=`<div style="color:#16a34a;font-size:11px;padding:8px 0;">No changes for ${esc(gl)} since ${esc(date)}. Findings still current.</div>`; }
-  else { let h=`<div style="color:#dc2626;font-size:11px;padding:4px 0;font-weight:600;">${result.total} change${result.total>1?'s':''} for ${esc(gl)} since ${esc(date)}:</div>`;
-    (result.changes||[]).forEach(c=>{h+=`<div class="variant-row"><span class="gene">${esc(c.gene)}</span><span class="hgvs">${esc((c.hgvs||'').substring(0,30))}</span><span class="val" style="font-size:9px;">${shortClass(c.old)} \u2192 ${shortClass(c.new)}</span></div>`;});
-    el.innerHTML=h+'<div style="color:#94a3b8;font-size:9px;margin-top:6px;">Computational observations. Verify with original ClinVar record.</div>'; }
-}
-
-// ── VCF Upload ─────────────────────────────────────────────
-function setupVCFDrop() {
-  const drop=$('vcf-drop'), input=$('vcf-input'); if (!drop||!input) return;
-  drop.addEventListener('dragover', e=>{e.preventDefault();drop.style.borderColor='#0f766e';});
-  drop.addEventListener('dragleave', ()=>{drop.style.borderColor='#e2e8f0';});
-  drop.addEventListener('drop', e=>{e.preventDefault();drop.style.borderColor='#e2e8f0';if(e.dataTransfer.files.length)processVCF(e.dataTransfer.files[0]);});
-  input.addEventListener('change', ()=>{if(input.files.length)processVCF(input.files[0]);});
-}
-
-async function processVCF(file) {
-  const res=$('vcf-results'); res.style.display='block'; res.innerHTML='<div style="color:#94a3b8">Parsing VCF locally...</div>';
-  const match = JSON.parse(tracker.match_vcf(await file.text()));
-  let h=`<div class="row"><span>Total VCF variants</span><span class="val">${match.total_vcf_variants}</span></div><div class="row"><span>Matched in ClinVar</span><span class="val">${match.matched_count}</span></div><div class="row"><span>Not in ClinVar</span><span class="val">${match.unmatched_count}</span></div><div class="row"><span class="badge-sm badge-path">Pathogenic</span><span class="val">${match.pathogenic?.length||0}</span></div><div class="row"><span class="badge-sm badge-vus">VUS</span><span class="val">${match.vus?.length||0}</span></div><div class="row"><span class="badge-sm badge-benign">Benign</span><span class="val">${match.benign?.length||0}</span></div>`;
-  if (match.pathogenic?.length) { h+='<div class="section-title" style="margin-top:8px">Pathogenic</div>'; match.pathogenic.slice(0,20).forEach(m=>{h+=`<div class="row"><span class="gene">${esc(m.gene)}</span><span class="hgvs">${esc(m.hgvs).substring(0,25)}</span><span class="badge-sm badge-path">path.</span></div>`;}); }
-  if (match.vus?.length) { h+='<div class="section-title" style="margin-top:8px">VUS</div>'; match.vus.slice(0,20).forEach(m=>{h+=`<div class="row"><span class="gene">${esc(m.gene)}</span><span class="hgvs">${esc(m.hgvs).substring(0,25)}</span><span class="badge-sm badge-vus">VUS</span></div>`;}); }
-  res.innerHTML = h;
-}
-
-// ── Export ──────────────────────────────────────────────────
-function buildExport(what, sep) {
-  if (!indexCache) return '';
-  const gene=focusGene||'LDLR'; let out='';
-  if (what==='focus'||what==='all') {
-    const genes=what==='all'?Object.keys(indexCache.gene_breakdowns||{}):[gene];
-    out+=`Gene${sep}Total${sep}Pathogenic${sep}Likely Path.${sep}VUS${sep}Likely Benign${sep}Benign${sep}Conflicting\n`;
-    genes.forEach(g=>{const d=indexCache.gene_breakdowns?.[g];if(d) out+=`${g}${sep}${d.total}${sep}${d.pathogenic}${sep}${d.likely_pathogenic}${sep}${d.vus}${sep}${d.likely_benign}${sep}${d.benign}${sep}${d.conflicting}\n`;});
+  if (state.stats) {
+    requestAnimationFrame(() => animateNumber(numEl, state.stats.total_variants || 0));
   }
-  if (what==='changes'&&tracker) { out+=`Gene${sep}HGVS${sep}Old${sep}New${sep}Date${sep}Submitter\n`; try{const r=JSON.parse(tracker.changes_since('','1900-01-01'));(r.changes||[]).forEach(c=>{out+=`${c.gene}${sep}${(c.hgvs||'').replace(/,/g,';')}${sep}${c.old}${sep}${c.new}${sep}${c.detected_at}${sep}${(c.submitter||'').replace(/,/g,';')}\n`;});}catch(e){} }
-  if (what==='top') { out+=`Gene${sep}Variants\n`; (indexCache.top_genes||[]).forEach(([n,c])=>{out+=`${n}${sep}${c}\n`;}); }
-  return out+`\nGenerated by nano-zyrkel-vusTracker \u00B7 Data: NCBI ClinVar (public domain)\n`;
+
+  // Time range buttons
+  const timeRow = h('div', { className: 'time-range' });
+  for (const r of ['1m', '1y', '5y', 'All']) {
+    const key = r.toLowerCase();
+    const btn = h('button', {
+      className: `time-btn${state.timeRange === key ? ' active' : ''}`,
+      onClick: () => { state.timeRange = key; state.geneListPage = 0; reloadOverview(); },
+    }, r);
+    timeRow.appendChild(btn);
+  }
+  container.appendChild(timeRow);
+
+  // Submissions timeline chart placeholder
+  const chartEl = h('div', { className: 'submissions-chart', id: 'submissions-chart' });
+  container.appendChild(chartEl);
+
+  // Gene list (or Top Phenotypes if in phenotype mode)
+  if (state.searchMode === 'phenotype' && !state.phenotypeGenes) {
+    // Show top conditions from ClinVar submissions (precomputed)
+    const phenoBox = h('div', { className: 'gene-list' });
+    phenoBox.appendChild(h('div', { className: 'gene-list-title' }, 'Top Phenotypes in ClinVar'));
+    if (state.topConditions && state.topConditions.length > 0) {
+      const maxC = state.topConditions[0]?.submission_count || 1;
+      const page = state.conditionListPage || 0;
+      const slice = state.topConditions.slice(page * 5, page * 5 + 5);
+      for (const c of slice) {
+        const pct = Math.max(4, (c.submission_count / maxC) * 100);
+        const row = h('div', { className: 'gene-row', onClick: () => { state.searchMode = 'phenotype'; handlePhenotypeSearchDirect(c.condition); } }, [
+          h('span', { className: 'gene-name', style: { fontSize: '11px' } }, c.condition),
+          h('span', { className: 'gene-vus-count' }, (c.submission_count || 0).toLocaleString()),
+        ]);
+        phenoBox.appendChild(row);
+        phenoBox.appendChild(h('div', { className: 'gene-bar-wrap' }, [h('div', { className: 'gene-bar', style: { width: pct + '%' } })]));
+      }
+      // Pagination
+      const totalPages = Math.ceil(state.topConditions.length / 5);
+      if (totalPages > 1) {
+        const pager = h('div', { className: 'variant-pager', style: { marginTop: '6px' } });
+        pager.appendChild(h('button', { className: 'page-btn', disabled: page <= 0, onClick: () => { state.conditionListPage = page - 1; render(); renderSubmissionsChart(); } }, '\u2190'));
+        pager.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary)' } }, `${page + 1}/${totalPages}`));
+        pager.appendChild(h('button', { className: 'page-btn', disabled: page >= totalPages - 1, onClick: () => { state.conditionListPage = page + 1; render(); renderSubmissionsChart(); } }, '\u2192'));
+        phenoBox.appendChild(pager);
+      }
+    } else {
+      phenoBox.appendChild(h('div', { className: 'computing-placeholder' }, [
+        h('div', { className: 'computing-bar' }, [h('div', { className: 'computing-fill' })]),
+        h('div', { className: 'computing-text' }, 'Loading top phenotypes...'),
+      ]));
+    }
+    container.appendChild(phenoBox);
+  } else if (state.genes.length > 0 && state.searchMode === 'gene') {
+    const list = h('div', { className: 'gene-list' });
+    list.appendChild(h('div', { className: 'gene-list-title' }, 'Top Genes by Submissions'));
+    const maxVal = state.genes[0]?.total_variants || 1;
+    const pageSize = 5;
+    const start = state.geneListPage * pageSize;
+    const pageGenes = state.genes.slice(start, start + pageSize);
+    const totalPages = Math.ceil(state.genes.length / pageSize);
+    pageGenes.forEach((g, i) => {
+      const pct = Math.max(4, ((g.total_variants || 0) / maxVal) * 100);
+      const row = h('div', { className: 'gene-row', onClick: () => selectGene(g.symbol) }, [
+        h('span', { className: 'gene-rank' }, `${start + i + 1}`),
+        h('span', { className: 'gene-name' }, g.symbol),
+        h('div', { className: 'gene-bar-wrap' }, [
+          h('div', { className: 'gene-bar', style: { width: `${pct}%` } }),
+        ]),
+        h('span', { className: 'gene-vus-count' }, (g.total_variants || 0).toLocaleString()),
+      ]);
+      list.appendChild(row);
+    });
+    // Pagination controls
+    if (totalPages > 1) {
+      const pager = h('div', { className: 'variant-pager' });
+      pager.appendChild(h('button', {
+        className: 'page-btn', disabled: state.geneListPage <= 0,
+        onClick: () => { state.geneListPage--; render(); renderSubmissionsChart(); },
+      }, '\u2190 Prev'));
+      pager.appendChild(h('span', { style: { fontSize: '11px', color: 'var(--text-secondary)', alignSelf: 'center' } },
+        `${state.geneListPage + 1}/${totalPages}`));
+      pager.appendChild(h('button', {
+        className: 'page-btn', disabled: state.geneListPage >= totalPages - 1,
+        onClick: () => { state.geneListPage++; render(); renderSubmissionsChart(); },
+      }, 'Next \u2192'));
+      list.appendChild(pager);
+    }
+    container.appendChild(list);
+  } else if (state.searchMode === 'gene') {
+    container.appendChild(h('div', { className: 'loading-spinner' }, [h('div', { className: 'spinner' })]));
+  }
+
+  return container;
 }
 
-window.doExport = function(format) {
-  const what=$('export-what').value, gene=focusGene||'LDLR', date=new Date().toISOString().slice(0,10), label=what==='focus'?gene:what;
-  const dl=(c,f,m)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([c],{type:m}));a.download=f;a.click();};
-  if (format==='csv') dl(buildExport(what,','),`vusTracker_${label}_${date}.csv`,'text/csv');
-  else if (format==='tsv') dl(buildExport(what,'\t'),`vusTracker_${label}_${date}.tsv`,'text/tab-separated-values');
-  else if (format==='xls') {
-    const rows=buildExport(what,'\t').split('\n').filter(l=>l).map(line=>'<Row>'+line.split('\t').map(c=>`<Cell><Data ss:Type="${isNaN(c)||c===''?'String':'Number'}">${c.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</Data></Cell>`).join('')+'</Row>').join('');
-    dl(`<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="${label}"><Table>${rows}</Table></Worksheet></Workbook>`,`vusTracker_${label}_${date}.xls`,'application/vnd.ms-excel');
-  }
-};
+// ── Reload Overview with time filter ──────────────────────────────────────
+async function reloadOverview() {
+  const df = dateFrom(state.timeRange);
+  const params = {};
+  if (df) params.date_from = df;
+  const period = state.timeRange === 'all' ? 'all' : state.timeRange;
 
-window.shareLink = function() {
-  const url=window.location.href;
-  if (navigator.share) navigator.share({title:`ClinVar ${focusGene} \u2014 vusTracker`,url});
-  else navigator.clipboard.writeText(url).then(()=>alert('Link copied!'));
-};
-
-// ── Helpers ────────────────────────────────────────────────
-function showLoading(msg) { $('loading-text').textContent=msg||'loading...'; $('loading').style.display='block'; }
-function hideLoading() { $('loading').style.display='none'; }
-function fmt(n) { if(n>=1e6) return (n/1e6).toFixed(1)+'M'; return Number(n).toLocaleString('en-US'); }
-function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function badgeClass(c) { const s=shortClass(c); return {'path.':'badge-path','l.path.':'badge-lpath','VUS':'badge-vus','l.ben.':'badge-lben','benign':'badge-benign','confl.':'badge-confl'}[s]||''; }
-
-function shortClass(c) {
-  if (!c) return '?';
-  if (typeof c === 'object') {
-    if ('Pathogenic' in c||c==='Pathogenic') return 'path.'; if ('LikelyPathogenic' in c||c==='LikelyPathogenic') return 'l.path.';
-    if ('Vus' in c||c==='Vus') return 'VUS'; if ('LikelyBenign' in c||c==='LikelyBenign') return 'l.ben.';
-    if ('Benign' in c||c==='Benign') return 'benign'; if ('ConflictingInterpretations' in c||c==='ConflictingInterpretations') return 'confl.';
-    if ('Other' in c) return c.Other||'?'; return JSON.stringify(c).substring(0,8);
-  }
-  const l=String(c).toLowerCase();
-  if (l.includes('pathogenic')&&l.includes('likely')) return 'l.path.'; if (l.includes('pathogenic')) return 'path.';
-  if (l.includes('uncertain')||l==='vus') return 'VUS'; if (l.includes('benign')&&l.includes('likely')) return 'l.ben.';
-  if (l.includes('benign')) return 'benign'; if (l.includes('conflicting')) return 'confl.'; return '?';
+  try {
+    const [statsRes, genesRes, tlRes, condRes] = await Promise.allSettled([
+      api('/stats', params),
+      api('/genes', { ...params, per_page: 100, sort: 'total_variants', order: 'desc' }),
+      api('/submissions-timeline', params),
+      api('/phenotype/top', { period }),
+    ]);
+    if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
+    if (genesRes.status === 'fulfilled') state.genes = (genesRes.value.data || []).sort((a, b) => (b.total_variants || 0) - (a.total_variants || 0));
+    state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
+    if (condRes.status === 'fulfilled') { state.topConditions = condRes.value.data || []; state.conditionListPage = 0; }
+  } catch (e) { console.error(e); }
+  render();
+  renderSubmissionsChart();
 }
 
-if (new URLSearchParams(window.location.search).get('embed')==='true') document.body.classList.add('embed');
+function renderSubmissionsChart() {
+  const el = document.getElementById('submissions-chart');
+  if (!el) return;
+  const buckets = state.submissionsTimeline;
+  if (!buckets?.length) { el.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:11px;padding:8px">No submission data for this range</div>'; return; }
+
+  // Same stacked-area style as gene timeline
+  const n = buckets.length, w = 380, h = 120;
+  const pad = { l: 36, r: 6, t: 8, b: 22 }, pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  // Build cumulative sums (starts at 0, grows over time)
+  let cumP = 0, cumV = 0, cumB = 0;
+  const cats = buckets.map(b => {
+    cumP += parseInt(b.path || 0) + parseInt(b.likely_pathogenic || 0);
+    cumV += parseInt(b.vus || 0);
+    cumB += parseInt(b.ben || 0);
+    return { month: b.period || b.month || b.day || '', p: cumP, v: cumV, b: cumB, total: cumP + cumV + cumB };
+  });
+  const maxY = Math.max(1, cats[cats.length - 1]?.total || 1);
+  const xAt = i => pad.l + (i / Math.max(1, n - 1)) * pw;
+  const yAt = v => pad.t + ph - (v / maxY) * ph;
+
+  // Stacked area paths (same as gene timeline)
+  const makePath = (upper, lower) => {
+    let d = 'M' + upper.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' L');
+    d += ' L' + [...lower].reverse().map((v, i) => `${xAt(n - 1 - i)},${yAt(v)}`).join(' L') + ' Z';
+    return d;
+  };
+
+  const benPath = makePath(cats.map(c => c.b), cats.map(() => 0));
+  const vusPath = makePath(cats.map(c => c.b + c.v), cats.map(c => c.b));
+  const pathPath = makePath(cats.map(c => c.total), cats.map(c => c.b + c.v));
+
+  // Y labels
+  const fmtY = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v;
+  const yLabels = [0, Math.round(maxY/2), maxY].map(v =>
+    `<text x="${pad.l-4}" y="${yAt(v)+3}" text-anchor="end" fill="#9CA3AF" font-size="8">${fmtY(v)}</text>`
+  ).join('');
+
+  // X labels
+  const step = Math.max(1, Math.floor(n / 5));
+  const xLabels = cats.filter((_, i) => i % step === 0 || i === n - 1).map(c =>
+    `<text x="${xAt(cats.indexOf(c))}" y="${h-4}" text-anchor="middle" fill="#9CA3AF" font-size="8">${(c.month||'').slice(2,7)}</text>`
+  ).join('');
+
+  // Grid lines
+  const grid = [0.25, 0.5, 0.75].map(f =>
+    `<line x1="${pad.l}" y1="${yAt(maxY*f)}" x2="${w-pad.r}" y2="${yAt(maxY*f)}" stroke="#F3F4F6" stroke-width="0.5"/>`
+  ).join('');
+
+  el.innerHTML = `<div style="font-size:11px;color:#6B7280;font-weight:600;margin-bottom:4px">ClinVar Submissions over Time</div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px" preserveAspectRatio="none">
+      ${grid}
+      <path d="${benPath}" fill="#3B82F6" opacity="0.5"/>
+      <path d="${vusPath}" fill="#EAB308" opacity="0.5"/>
+      <path d="${pathPath}" fill="#EF4444" opacity="0.5"/>
+      ${yLabels}${xLabels}
+    </svg>
+    <div style="display:flex;gap:12px;justify-content:center;font-size:9px;color:#6B7280;margin-top:2px">
+      <span><span style="color:#EF4444">●</span> LP/P</span>
+      <span><span style="color:#EAB308">●</span> VUS</span>
+      <span><span style="color:#3B82F6">●</span> B/LB</span>
+    </div>`;
+}
+
+// ── Gene Selection ─────────────────────────────────────────────────────────
+async function selectGene(symbol) {
+  state.mode = 'gene';
+  state.selectedGene = symbol;
+  state.geneData = {};
+  state.variants = [];
+  state.variantPage = 1;
+  state.expandedVariants.clear();
+  state.activeFilters = new Set(['pathogenic', 'likely_pathogenic', 'uncertain_significance', 'likely_benign', 'benign']);
+  state.hgvsFilter = '';
+  state.codingFilter = 'all';
+  state.positionFrom = '';
+  state.positionTo = '';
+
+  // INSTANT: show gene name + computing placeholders
+  render();
+
+  const df = dateFrom(state.timeRange);
+  const variantParams = { per_page: 5 };
+  if (df) variantParams.date_from = df;
+  const classFilter = [...state.activeFilters].join(',');
+  if (classFilter) variantParams.classification = classFilter;
+
+  // Phase 1: Gene header + variants (fast, ~300ms)
+  try {
+    const [geneRes, varRes] = await Promise.all([
+      api(`/genes/${symbol}`),
+      api(`/genes/${symbol}/variants`, variantParams),
+    ]);
+    if (geneRes) state.geneData.gene = geneRes.data;
+    if (varRes) { state.variants = varRes.data || []; state.variantsMeta = { total: varRes.total, per_page: varRes.per_page, current_page: varRes.current_page, last_page: varRes.last_page }; }
+    render(); // Update immediately with gene header + variants
+  } catch(e) { console.error('Gene load:', e); }
+
+  // Phase 2: Heavy computations in background (user sees data already)
+  Promise.allSettled([
+    api(`/genes/${symbol}/timeline`),
+    api(`/genes/${symbol}/drift`),
+    api(`/genes/${symbol}/genome-browser`),
+    api(`/genes/${symbol}/concordance`),
+    api(`/genes/${symbol}/survival`),
+  ]).then(([timelineRes, driftRes, browserRes, concRes, survRes]) => {
+    if (timelineRes.status === 'fulfilled') state.geneData.timeline = timelineRes.value.data;
+    if (driftRes.status === 'fulfilled') state.geneData.drift = driftRes.value.data;
+    if (browserRes.status === 'fulfilled') state.geneData.browser = browserRes.value.data;
+    if (concRes.status === 'fulfilled') state.geneData.concordance = concRes.value.data;
+    if (survRes.status === 'fulfilled') state.geneData.survival = survRes.value.data;
+    render(); // Final update with all sections
+  });
+}
+
+// ── Reload variants (filter/time change) ───────────────────────────────────
+async function reloadVariants() {
+  if (!state.selectedGene) return;
+  const df = dateFrom(state.timeRange);
+  const params = { per_page: 5 };
+  if (df) params.date_from = df;
+  const classFilter = [...state.activeFilters].join(',');
+  if (classFilter) params.classification = classFilter;
+  if (state.variantPage > 1) params.page = state.variantPage;
+  if (state.hgvsFilter) params.hgvs_search = state.hgvsFilter;
+  if (state.positionFrom) params.pos_from = state.positionFrom;
+  if (state.positionTo) params.pos_to = state.positionTo;
+
+  try {
+    const res = await api(`/genes/${state.selectedGene}/variants`, params);
+    let filtered = res.data || [];
+    // Client-side coding/noncoding filter
+    if (state.codingFilter === 'coding') {
+      filtered = filtered.filter(v => v.hgvs && /c\./.test(v.hgvs));
+    } else if (state.codingFilter === 'noncoding') {
+      filtered = filtered.filter(v => !v.hgvs || !/c\./.test(v.hgvs));
+    }
+    // Client-side HGVS fallback filter (in case API ignores hgvs_search)
+    if (state.hgvsFilter) {
+      const q = state.hgvsFilter.toLowerCase();
+      filtered = filtered.filter(v => v.hgvs && v.hgvs.toLowerCase().includes(q));
+    }
+    // Client-side position range fallback
+    if (state.positionFrom) {
+      const from = parseInt(state.positionFrom);
+      if (!isNaN(from)) filtered = filtered.filter(v => v.position >= from);
+    }
+    if (state.positionTo) {
+      const to = parseInt(state.positionTo);
+      if (!isNaN(to)) filtered = filtered.filter(v => v.position <= to);
+    }
+    state.variants = filtered;
+    state.variantsMeta = { total: res.total, per_page: res.per_page, current_page: res.current_page, last_page: res.last_page };
+  } catch (e) {
+    console.error('Reload variants error:', e);
+  }
+  render();
+}
+
+// ── Gene Detail Mode ───────────────────────────────────────────────────────
+function renderGeneDetail() {
+  const container = h('div', { className: 'gene-detail' });
+
+  // Back button
+  container.appendChild(h('button', {
+    className: 'back-btn',
+    onClick: () => { state.mode = 'overview'; state.selectedGene = null; render(); },
+    innerHTML: '&larr; Back',
+  }));
+
+  const scroll = h('div', { className: 'detail-scroll' });
+
+  const gene = state.geneData.gene;
+  if (!gene) {
+    // Show gene name immediately with computing animation
+    scroll.appendChild(h('div', { className: 'gene-header-loading' }, [
+      h('div', { className: 'gene-name-big' }, state.selectedGene || '...'),
+      h('div', { className: 'computing-bar' }, [
+        h('div', { className: 'computing-fill' }),
+      ]),
+      h('div', { className: 'computing-text' }, 'Querying ClinVar database...'),
+    ]));
+    container.appendChild(scroll);
+    return container;
+  }
+
+  // Gene header
+  scroll.appendChild(renderGeneHeader(gene));
+
+  // Filter chips
+  scroll.appendChild(renderFilterChips());
+
+  // Time range
+  const timeRow = h('div', { className: 'time-range' });
+  for (const r of ['1m', '1y', '5y', 'All']) {
+    const key = r.toLowerCase();
+    const btn = h('button', {
+      className: `time-btn${state.timeRange === key ? ' active' : ''}`,
+      onClick: () => { state.timeRange = key; state.variantPage = 1; reloadVariants(); },
+    }, r);
+    timeRow.appendChild(btn);
+  }
+  scroll.appendChild(timeRow);
+
+  // Sections — show "computing" indicator if data not yet loaded
+  const gd = state.geneData;
+  scroll.appendChild(makeSection(`Variants (${state.variantsMeta?.total?.toLocaleString() || '...'})`, renderVariantList, true));
+  scroll.appendChild(makeSection('Genome Browser', gd.browser ? renderGenomeBrowser : () => computingPlaceholder('Querying genomic coordinates...'), true));
+  scroll.appendChild(makeSection('Classification Drift', gd.drift ? renderDriftChart : () => computingPlaceholder('Computing classification drift...'), true));
+  scroll.appendChild(makeSection('Timeline', gd.timeline ? renderTimelineChart : () => computingPlaceholder('Aggregating submission timeline...'), true));
+  if (gd.concordance?.matrix?.length) scroll.appendChild(makeSection('Concordance', renderConcordance, true));
+  if (gd.survival?.points?.length > 1) scroll.appendChild(makeSection('VUS Survival', renderSurvivalChart, true));
+
+  container.appendChild(scroll);
+  return container;
+}
+
+function renderGeneHeader(gene) {
+  const hdr = h('div', { className: 'gene-header' });
+  hdr.appendChild(h('div', { className: 'gene-title' }, gene.symbol || state.selectedGene));
+
+  // Links
+  const meta = h('div', { className: 'gene-meta' });
+  if (gene.omim_id) meta.appendChild(h('a', { className: 'meta-link', href: `https://omim.org/entry/${gene.omim_id}`, target: '_blank' }, `OMIM:${gene.omim_id}`));
+  if (gene.medgen_id) meta.appendChild(h('a', { className: 'meta-link', href: `https://www.ncbi.nlm.nih.gov/medgen/${gene.medgen_id}`, target: '_blank' }, `MedGen:${gene.medgen_id}`));
+  if (gene.total_variants) meta.appendChild(h('span', { className: 'meta-link', style: { color: 'var(--text-secondary)' } }, `${gene.total_variants} total variants`));
+  hdr.appendChild(meta);
+
+  // Classification counts + donut
+  const cc = gene.classification_counts || {};
+  const counts = h('div', { className: 'class-counts' });
+  for (const [key, label] of Object.entries(CLASS_SHORT)) {
+    const val = cc[key] || 0;
+    if (val > 0) {
+      counts.appendChild(h('span', { className: `class-badge ${CLASS_CSS[key]}` }, `${label} ${val}`));
+    }
+  }
+  hdr.appendChild(counts);
+
+  // Donut
+  const total = Object.values(cc).reduce((s, v) => s + (v || 0), 0);
+  if (total > 0) {
+    const donutRow = h('div', { className: 'donut-row' });
+    donutRow.appendChild(renderDonut(cc, total));
+
+    // Distribution bar
+    const distBar = h('div', { className: 'class-dist-bar' });
+    for (const key of Object.keys(CLASS_COLORS)) {
+      const pct = ((cc[key] || 0) / total) * 100;
+      if (pct > 0) distBar.appendChild(h('div', { style: { width: `${pct}%`, background: CLASS_COLORS[key] } }));
+    }
+    const distWrap = h('div', { style: { flex: '1' } });
+    distWrap.appendChild(distBar);
+
+    // Legend
+    const legend = h('div', { className: 'donut-legend' });
+    for (const [key, color] of Object.entries(CLASS_COLORS)) {
+      if ((cc[key] || 0) > 0) {
+        const item = h('span', {}, [
+          h('span', { className: 'legend-dot', style: { background: color } }),
+          `${CLASS_SHORT[key]} ${((cc[key] / total) * 100).toFixed(0)}%`,
+        ]);
+        legend.appendChild(item);
+      }
+    }
+    distWrap.appendChild(legend);
+    donutRow.appendChild(distWrap);
+    hdr.appendChild(donutRow);
+  }
+
+  // Conditions (clickable — switches to phenotype search)
+  if (gene.conditions && gene.conditions.length > 0) {
+    const tags = h('div', { className: 'condition-tags' });
+    for (const c of gene.conditions.slice(0, 6)) {
+      const name = typeof c === 'string' ? c : (c.name || c.condition_name || JSON.stringify(c));
+      tags.appendChild(h('span', {
+        className: 'condition-tag',
+        title: `Search phenotype: ${name}`,
+        style: { cursor: 'pointer' },
+        onClick: (e) => {
+          e.stopPropagation();
+          state.mode = 'overview';
+          state.selectedGene = null;
+          state.searchMode = 'phenotype';
+          state.phenotypeGenes = null;
+          state.selectedHpoTerms = [];
+          handlePhenotypeSearchDirect(name);
+        },
+      }, name));
+    }
+    hdr.appendChild(tags);
+  }
+
+  return hdr;
+}
+
+function renderDonut(cc, total) {
+  const size = 60;
+  const cx = size / 2, cy = size / 2, r = 22, strokeW = 8;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  let paths = '';
+
+  for (const [key, color] of Object.entries(CLASS_COLORS)) {
+    const val = cc[key] || 0;
+    if (val === 0) continue;
+    const pct = val / total;
+    const dashLen = circumference * pct;
+    paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${strokeW}" stroke-dasharray="${dashLen} ${circumference - dashLen}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    offset += dashLen;
+  }
+
+  const svg = h('svg', {
+    className: 'donut-svg', width: size, height: size, viewBox: `0 0 ${size} ${size}`,
+    innerHTML: `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#E5E7EB" stroke-width="${strokeW}"/>${paths}<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="700" fill="#111827">${total}</text>`,
+  });
+  return svg;
+}
+
+// ── Filter Chips ───────────────────────────────────────────────────────────
+function renderFilterChips() {
+  const wrap = h('div', { className: 'filter-section' });
+
+  // Classification chips row
+  const row = h('div', { className: 'filter-chips' });
+  for (const [key, label] of Object.entries(CLASS_SHORT)) {
+    const active = state.activeFilters.has(key);
+    const chip = h('div', {
+      className: `filter-chip ${CLASS_CSS[key]}${active ? '' : ' inactive'}`,
+      onClick: () => {
+        if (active) state.activeFilters.delete(key);
+        else state.activeFilters.add(key);
+        state.variantPage = 1;
+        reloadVariants();
+        renderGenomeBrowserCanvas();
+      },
+    }, label);
+    row.appendChild(chip);
+  }
+  wrap.appendChild(row);
+
+  // Coding / Non-coding toggle chips
+  const codingRow = h('div', { className: 'filter-chips', style: { marginTop: '4px' } });
+  for (const [val, label] of [['all', 'All'], ['coding', 'Coding'], ['noncoding', 'Non-coding']]) {
+    const active = state.codingFilter === val;
+    const chip = h('div', {
+      className: `filter-chip${active ? ' coding-active' : ' inactive'}`,
+      style: { fontSize: '10px', padding: '2px 6px', background: active ? '#8B5CF6' : '', color: active ? '#fff' : '' },
+      onClick: () => {
+        state.codingFilter = val;
+        state.variantPage = 1;
+        reloadVariants();
+      },
+    }, label);
+    codingRow.appendChild(chip);
+  }
+  wrap.appendChild(codingRow);
+
+  // HGVS search input
+  const hgvsRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px', alignItems: 'center' } });
+  const hgvsInput = h('input', {
+    type: 'text', placeholder: 'Filter by c./p. notation...',
+    value: state.hgvsFilter,
+    className: 'filter-input',
+    style: { flex: '1', fontSize: '11px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #E5E7EB', background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #111)' },
+    onInput: (e) => {
+      state.hgvsFilter = e.target.value;
+      state.variantPage = 1;
+      clearTimeout(state._hgvsTimeout);
+      state._hgvsTimeout = setTimeout(() => reloadVariants(), 400);
+    },
+  });
+  hgvsRow.appendChild(hgvsInput);
+  if (state.hgvsFilter) {
+    hgvsRow.appendChild(h('span', {
+      style: { cursor: 'pointer', fontSize: '14px', color: '#9CA3AF' },
+      onClick: () => { state.hgvsFilter = ''; state.variantPage = 1; reloadVariants(); },
+    }, '\u00D7'));
+  }
+  wrap.appendChild(hgvsRow);
+
+  // Position range inputs
+  const posRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '4px', alignItems: 'center' } });
+  posRow.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary, #6B7280)', whiteSpace: 'nowrap' } }, 'Pos:'));
+  const posFromInput = h('input', {
+    type: 'text', placeholder: 'from',
+    value: state.positionFrom,
+    style: { width: '70px', fontSize: '11px', padding: '3px 6px', borderRadius: '6px', border: '1px solid #E5E7EB', background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #111)' },
+    onInput: (e) => {
+      state.positionFrom = e.target.value;
+      state.variantPage = 1;
+      clearTimeout(state._posTimeout);
+      state._posTimeout = setTimeout(() => reloadVariants(), 600);
+    },
+  });
+  const posToInput = h('input', {
+    type: 'text', placeholder: 'to',
+    value: state.positionTo,
+    style: { width: '70px', fontSize: '11px', padding: '3px 6px', borderRadius: '6px', border: '1px solid #E5E7EB', background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #111)' },
+    onInput: (e) => {
+      state.positionTo = e.target.value;
+      state.variantPage = 1;
+      clearTimeout(state._posTimeout);
+      state._posTimeout = setTimeout(() => reloadVariants(), 600);
+    },
+  });
+  posRow.appendChild(posFromInput);
+  posRow.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary, #6B7280)' } }, '\u2013'));
+  posRow.appendChild(posToInput);
+  if (state.positionFrom || state.positionTo) {
+    posRow.appendChild(h('span', {
+      style: { cursor: 'pointer', fontSize: '14px', color: '#9CA3AF' },
+      onClick: () => { state.positionFrom = ''; state.positionTo = ''; state.variantPage = 1; reloadVariants(); },
+    }, '\u00D7'));
+  }
+  wrap.appendChild(posRow);
+
+  return wrap;
+}
+
+function computingPlaceholder(msg) {
+  return h('div', { className: 'computing-placeholder' }, [
+    h('div', { className: 'computing-bar' }, [h('div', { className: 'computing-fill' })]),
+    h('div', { className: 'computing-text' }, msg || 'Computing...'),
+  ]);
+}
+
+// ── Collapsible Section ────────────────────────────────────────────────────
+function makeSection(title, contentOrFn, collapsed = false) {
+  const section = h('div', { className: `section${collapsed ? ' collapsed' : ''}` });
+  const header = h('div', { className: 'section-header' }, [
+    h('span', { className: 'section-title' }, title),
+    h('span', { className: 'section-toggle' }, '\u25BC'),
+  ]);
+  const body = h('div', { className: 'section-body' });
+  let rendered = false;
+
+  header.addEventListener('click', () => {
+    const wasCollapsed = section.classList.contains('collapsed');
+    section.classList.toggle('collapsed');
+    // Lazy render: only build content on first expand
+    if (wasCollapsed && !rendered && typeof contentOrFn === 'function') {
+      rendered = true;
+      body.appendChild(contentOrFn());
+    }
+  });
+
+  // If not collapsed or content is already an element, render immediately
+  if (typeof contentOrFn !== 'function') {
+    body.appendChild(contentOrFn);
+    rendered = true;
+  } else if (!collapsed) {
+    body.appendChild(contentOrFn());
+    rendered = true;
+  }
+
+  section.appendChild(header);
+  section.appendChild(body);
+  return section;
+}
+
+// ── Variant List ───────────────────────────────────────────────────────────
+function renderVariantList() {
+  const wrap = h('div');
+  if (state.variants.length === 0) {
+    wrap.appendChild(h('div', { className: 'empty-state' }, 'No variants found for current filters'));
+    return wrap;
+  }
+
+  for (const v of state.variants) {
+    const card = h('div', { className: `variant-card${state.expandedVariants.has(v.hgvs) ? ' open' : ''}` });
+    const classLabel = (v.classification || '').replace(/_/g, ' ');
+    const classKey = v.classification || 'uncertain_significance';
+
+    const top = h('div', { className: 'variant-top', onClick: () => {
+      if (state.expandedVariants.has(v.hgvs)) state.expandedVariants.delete(v.hgvs);
+      else state.expandedVariants.add(v.hgvs);
+      card.classList.toggle('open');
+    }}, [
+      h('span', { className: 'variant-hgvs' }, v.hgvs || 'Unknown'),
+      h('span', { className: `variant-class-tag ${classKey}` }, CLASS_SHORT[classKey] || classLabel),
+    ]);
+    card.appendChild(top);
+
+    // Expanded details
+    const details = h('div', { className: 'variant-expanded' });
+    if (v.chromosome && v.position) {
+      details.appendChild(h('div', { className: 'variant-detail-row' }, [
+        h('span', { className: 'variant-detail-label' }, 'Position:'),
+        h('span', {}, `chr${v.chromosome}:${v.position}`),
+      ]));
+    }
+    if (v.review_status) {
+      details.appendChild(h('div', { className: 'variant-detail-row' }, [
+        h('span', { className: 'variant-detail-label' }, 'Review:'),
+        h('span', {}, v.review_status),
+      ]));
+    }
+    if (v.last_evaluated) {
+      details.appendChild(h('div', { className: 'variant-detail-row' }, [
+        h('span', { className: 'variant-detail-label' }, 'Last evaluated:'),
+        h('span', {}, v.last_evaluated),
+      ]));
+    }
+    if (v.phenotype_ids) {
+      const pids = typeof v.phenotype_ids === 'string' ? JSON.parse(v.phenotype_ids) : v.phenotype_ids;
+      const links = [];
+      if (pids?.omim) pids.omim.forEach(id => links.push(h('a', { href: `https://omim.org/entry/${id}`, target: '_blank', className: 'pheno-link' }, `OMIM:${id}`)));
+      if (pids?.medgen) pids.medgen.forEach(id => links.push(h('a', { href: `https://www.ncbi.nlm.nih.gov/medgen/${id}`, target: '_blank', className: 'pheno-link' }, `MedGen:${id}`)));
+      if (pids?.orphanet) pids.orphanet.forEach(id => links.push(h('a', { href: `https://www.orpha.net/en/disease/detail/${id}`, target: '_blank', className: 'pheno-link' }, `ORPHA:${id}`)));
+      if (pids?.hpo) pids.hpo.forEach(id => links.push(h('a', { href: `https://hpo.jax.org/browse/term/${id}`, target: '_blank', className: 'pheno-link' }, id)));
+      if (links.length) {
+        const row = h('div', { className: 'variant-detail-row' });
+        row.appendChild(h('span', { className: 'variant-detail-label' }, 'Phenotype:'));
+        const innerWrap = h('span', { className: 'pheno-links' });
+        links.forEach(l => innerWrap.appendChild(l));
+        row.appendChild(innerWrap);
+        details.appendChild(row);
+      }
+    }
+    if (v.clinvar_id || v.variation_id) {
+      const cvId = v.clinvar_id || v.variation_id;
+      details.appendChild(h('div', { style: { marginTop: '4px' } }, [
+        h('a', { href: `https://www.ncbi.nlm.nih.gov/clinvar/variation/${cvId}/`, target: '_blank' }, 'View on ClinVar \u2192'),
+      ]));
+    }
+    card.appendChild(details);
+    wrap.appendChild(card);
+  }
+
+  // Server-side pagination (per_page=5)
+  const meta = state.variantsMeta || {};
+  const totalPages = meta.last_page || Math.ceil((meta.total || state.variants.length) / 5);
+  const pager = h('div', { className: 'variant-pager' });
+  pager.appendChild(h('button', {
+    className: 'page-btn', disabled: state.variantPage <= 1,
+    onClick: () => { state.variantPage--; reloadVariants(); },
+  }, '\u2190 Prev'));
+  pager.appendChild(h('span', { style: { fontSize: '11px', color: 'var(--text-secondary)', alignSelf: 'center' } },
+    `${state.variantPage}/${totalPages || 1}${meta.total ? ` (${meta.total} total)` : ''}`));
+  pager.appendChild(h('button', {
+    className: 'page-btn', disabled: state.variantPage >= totalPages,
+    onClick: () => { state.variantPage++; reloadVariants(); },
+  }, 'Next \u2192'));
+  pager.appendChild(h('button', {
+    className: 'page-btn export-all-btn', title: 'Export all variants (CSV)',
+    onClick: () => exportAllVariants(),
+  }, 'Export All'));
+  wrap.appendChild(pager);
+
+  return wrap;
+}
+
+async function exportAllVariants() {
+  if (!state.selectedGene) return;
+  try {
+    const df = dateFrom(state.timeRange);
+    const params = { per_page: 10000 };
+    if (df) params.date_from = df;
+    const classFilter = [...state.activeFilters].join(',');
+    if (classFilter) params.classification = classFilter;
+    const res = await api(`/genes/${state.selectedGene}/variants`, params);
+    const allVars = res.data || [];
+    if (allVars.length === 0) return;
+
+    const sep = ',';
+    const headers = ['hgvs', 'classification', 'chromosome', 'position', 'review_status', 'last_evaluated', 'clinvar_id'];
+    const rows = [headers.join(sep)];
+    for (const v of allVars) {
+      const row = headers.map(hdr => {
+        let val = v[hdr] || '';
+        if (typeof val === 'string' && (val.includes(sep) || val.includes('"') || val.includes('\n'))) {
+          val = '"' + val.replace(/"/g, '""') + '"';
+        }
+        return val;
+      });
+      rows.push(row.join(sep));
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${state.selectedGene}_all_variants.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error('Export all error:', e);
+  }
+}
+
+// ── Genome Browser ─────────────────────────────────────────────────────────
+let genomeBrowserCanvasEl = null;
+let genomeBrowserTooltipEl = null;
+
+function renderGenomeBrowser() {
+  const wrap = h('div', { className: 'genome-browser' });
+  const canvas = h('canvas', { className: 'genome-canvas' });
+  const tooltip = h('div', { className: 'genome-tooltip' });
+  const controls = h('div', { className: 'genome-controls' }, [
+    h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.min(state.genomeBrowser.zoom * 1.5, 20); renderGenomeBrowserCanvas(); } }, 'Zoom +'),
+    h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.5, 0.01); state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Zoom \u2212'),
+    h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = 1; state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Reset'),
+  ]);
+
+  wrap.appendChild(canvas);
+  wrap.appendChild(tooltip);
+  wrap.appendChild(controls);
+
+  genomeBrowserCanvasEl = canvas;
+  genomeBrowserTooltipEl = tooltip;
+
+  // Mouse events for pan and hover
+  canvas.addEventListener('mousedown', (e) => {
+    state.genomeBrowser.dragging = true;
+    state.genomeBrowser.lastX = e.clientX;
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    if (state.genomeBrowser.dragging) {
+      const dx = e.clientX - state.genomeBrowser.lastX;
+      state.genomeBrowser.panX += dx;
+      state.genomeBrowser.lastX = e.clientX;
+      renderGenomeBrowserCanvas();
+    } else {
+      handleBrowserHover(e, canvas, tooltip);
+    }
+  });
+  canvas.addEventListener('mouseup', () => { state.genomeBrowser.dragging = false; });
+  canvas.addEventListener('mouseleave', () => { state.genomeBrowser.dragging = false; tooltip.style.display = 'none'; });
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    if (e.deltaY < 0) state.genomeBrowser.zoom = Math.min(state.genomeBrowser.zoom * 1.2, 20);
+    else { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.2, 0.01); }
+    renderGenomeBrowserCanvas();
+  }, { passive: false });
+
+  requestAnimationFrame(() => renderGenomeBrowserCanvas());
+  return wrap;
+}
+
+function getFilteredBrowserVariants() {
+  const data = state.geneData.browser;
+  if (!data || !data.variants) return [];
+  return data.variants.filter(v => state.activeFilters.has(v.classification));
+}
+
+function renderGenomeBrowserCanvas() {
+  const canvas = genomeBrowserCanvasEl;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = 120 * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = '120px';
+  ctx.scale(dpr, dpr);
+  const W = rect.width, H = 120;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const variants = getFilteredBrowserVariants();
+  if (variants.length === 0) {
+    ctx.fillStyle = '#6B7280';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No variants to display', W / 2, H / 2);
+    return;
+  }
+
+  const positions = variants.map(v => v.position).filter(p => p != null);
+  if (positions.length === 0) return;
+
+  const minPos = Math.min(...positions);
+  const maxPos = Math.max(...positions);
+  const range = Math.max(maxPos - minPos, 1);
+  const zoom = state.genomeBrowser.zoom;
+  const panX = state.genomeBrowser.panX;
+
+  const padding = 20;
+  const plotW = (W - padding * 2) * zoom;
+  const geneY = H - 30;
+
+  // Calculate visible genomic range based on zoom/pan
+  const viewStart = minPos - (padding - panX) / plotW * range;
+  const viewEnd = minPos + (W - padding - panX) / plotW * range;
+
+  // Gene boundary markers (dashed vertical lines at gene start/end)
+  ctx.save();
+  ctx.setLineDash([4, 3]);
+  ctx.strokeStyle = '#8B5CF6';
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.6;
+  // Gene start boundary
+  const geneStartX = padding + ((minPos - minPos) / range) * plotW + panX;
+  ctx.beginPath();
+  ctx.moveTo(geneStartX, 18);
+  ctx.lineTo(geneStartX, geneY + 6);
+  ctx.stroke();
+  // Gene end boundary
+  const geneEndX = padding + ((maxPos - minPos) / range) * plotW + panX;
+  ctx.beginPath();
+  ctx.moveTo(geneEndX, 18);
+  ctx.lineTo(geneEndX, geneY + 6);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // Gene body bar
+  ctx.fillStyle = '#E5E7EB';
+  const geneBarStart = padding + panX;
+  ctx.fillRect(geneBarStart, geneY, plotW, 6);
+  ctx.fillStyle = '#8B5CF6';
+  ctx.fillRect(geneBarStart, geneY, plotW, 6);
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(geneBarStart, geneY, plotW, 6);
+  ctx.globalAlpha = 1;
+
+  // Gene name label centered on gene body
+  ctx.fillStyle = '#6B7280';
+  ctx.font = '10px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  const geneName = state.geneData.browser?.gene || state.selectedGene;
+  ctx.fillText(geneName, W / 2, geneY + 18);
+
+  // Upstream/downstream context when zoomed out
+  if (zoom < 0.3) {
+    ctx.font = '10px Inter, sans-serif';
+    ctx.fillStyle = '#B0B0B0';
+    // Upstream label (left of gene start)
+    if (geneStartX > 30) {
+      ctx.textAlign = 'left';
+      ctx.fillText('\u2190 upstream genes', 4, geneY + 3);
+    }
+    // Downstream label (right of gene end)
+    if (geneEndX < W - 30) {
+      ctx.textAlign = 'right';
+      ctx.fillText('downstream genes \u2192', W - 4, geneY + 3);
+    }
+  }
+  if (zoom < 0.1) {
+    ctx.font = '11px Inter, sans-serif';
+    ctx.fillStyle = '#9CA3AF';
+    ctx.textAlign = 'center';
+    ctx.fillText('Chromosomal context \u2014 zoom out further for full view', W / 2, 28);
+  }
+
+  // Lollipop stems + heads
+  for (const v of variants) {
+    if (v.position == null) continue;
+    const x = padding + ((v.position - minPos) / range) * plotW + panX;
+    if (x < 0 || x > W) continue;
+
+    const color = CLASS_COLORS[v.classification] || '#6B7280';
+    const stemH = 40 + Math.random() * 20; // slight jitter to avoid overlap
+
+    // Stem
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1;
+    ctx.moveTo(x, geneY);
+    ctx.lineTo(x, geneY - stemH);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Head
+    ctx.beginPath();
+    ctx.fillStyle = color;
+    ctx.arc(x, geneY - stemH, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Position labels
+  ctx.fillStyle = '#9CA3AF';
+  ctx.font = '9px Inter, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(minPos.toLocaleString(), padding + panX, H - 6);
+  ctx.textAlign = 'right';
+  ctx.fillText(maxPos.toLocaleString(), padding + plotW + panX, H - 6);
+
+  // Neighboring genomic context indicators
+  const chrLabel = state.geneData.browser?.chromosome || (variants[0]?.chromosome ? `chr${variants[0].chromosome}` : '');
+  const band = state.geneData.browser?.cytoband || '';
+  ctx.font = '9px Inter, sans-serif';
+  ctx.fillStyle = '#B0B0B0';
+  ctx.textAlign = 'left';
+  ctx.fillText(band ? `\u2190 ${chrLabel}${band} 5'` : '\u2190 5\' upstream', 2, 12);
+  ctx.textAlign = 'right';
+  ctx.fillText(band ? `3\' ${chrLabel}${band} \u2192` : '3\' downstream \u2192', W - 2, 12);
+
+  // Store variant positions for hover
+  canvas._variantPositions = variants.map(v => {
+    if (v.position == null) return null;
+    const x = padding + ((v.position - minPos) / range) * plotW + panX;
+    return { x, variant: v };
+  }).filter(Boolean);
+}
+
+function handleBrowserHover(e, canvas, tooltip) {
+  if (!canvas._variantPositions) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  let closest = null;
+  let closestDist = 15;
+  for (const vp of canvas._variantPositions) {
+    const dist = Math.abs(vp.x - mx);
+    if (dist < closestDist) {
+      closestDist = dist;
+      closest = vp;
+    }
+  }
+
+  if (closest) {
+    tooltip.style.display = 'block';
+    tooltip.style.left = Math.min(closest.x, rect.width - 120) + 'px';
+    tooltip.style.top = (my - 30) + 'px';
+    const cls = CLASS_SHORT[closest.variant.classification] || closest.variant.classification;
+    tooltip.textContent = `${closest.variant.hgvs || ''} (${cls}) chr${closest.variant.chromosome || '?'}:${closest.variant.position || '?'}`;
+  } else {
+    tooltip.style.display = 'none';
+  }
+}
+
+// ── Chart: Drift (stacked area) ────────────────────────────────────────────
+function renderDriftChart() {
+  const wrap = h('div');
+  const data = state.geneData.drift;
+  if (!data || !data.snapshots || data.snapshots.length === 0) {
+    wrap.appendChild(h('div', { className: 'empty-state' }, 'No drift data available'));
+    return wrap;
+  }
+
+  const canvas = h('canvas', { className: 'chart-canvas' });
+  wrap.appendChild(canvas);
+
+  requestAnimationFrame(() => {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 140 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '140px';
+    ctx.scale(dpr, dpr);
+    const W = rect.width, H = 140;
+
+    const snaps = data.snapshots;
+    const keys = ['pathogenic', 'vus', 'benign'];
+    const colors = { pathogenic: '#EF4444', vus: '#EAB308', benign: '#3B82F6' };
+    const maxTotal = Math.max(...snaps.map(s => s.total || 1));
+    const pad = { l: 30, r: 10, t: 10, b: 24 };
+    const plotW = W - pad.l - pad.r;
+    const plotH = H - pad.t - pad.b;
+
+    // Draw stacked areas
+    for (let ki = keys.length - 1; ki >= 0; ki--) {
+      ctx.beginPath();
+      ctx.moveTo(pad.l, pad.t + plotH);
+
+      for (let i = 0; i < snaps.length; i++) {
+        const x = pad.l + (i / Math.max(snaps.length - 1, 1)) * plotW;
+        let stackVal = 0;
+        for (let j = 0; j <= ki; j++) stackVal += snaps[i][keys[j]] || 0;
+        const y = pad.t + plotH - (stackVal / maxTotal) * plotH;
+        ctx.lineTo(x, y);
+      }
+
+      ctx.lineTo(pad.l + plotW, pad.t + plotH);
+      ctx.closePath();
+      ctx.fillStyle = colors[keys[ki]];
+      ctx.globalAlpha = 0.6;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // X-axis labels
+    ctx.fillStyle = '#9CA3AF';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    for (let i = 0; i < snaps.length; i++) {
+      const x = pad.l + (i / Math.max(snaps.length - 1, 1)) * plotW;
+      ctx.fillText(snaps[i].year || '', x, H - 6);
+    }
+
+    // Y-axis
+    ctx.textAlign = 'right';
+    ctx.fillText('0', pad.l - 4, pad.t + plotH);
+    ctx.fillText(maxTotal.toLocaleString(), pad.l - 4, pad.t + 10);
+  });
+
+  return wrap;
+}
+
+// ── Chart: Timeline (monthly bar chart) ────────────────────────────────────
+function renderTimelineChart() {
+  const wrap = h('div');
+  const data = state.geneData.timeline;
+  if (!data || !data.buckets || data.buckets.length === 0) {
+    wrap.appendChild(h('div', { className: 'empty-state' }, 'No timeline data available'));
+    return wrap;
+  }
+
+  const canvas = h('canvas', { className: 'chart-canvas' });
+  wrap.appendChild(canvas);
+
+  requestAnimationFrame(() => {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 140 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '140px';
+    ctx.scale(dpr, dpr);
+    const W = rect.width, H = 140;
+
+    const buckets = data.buckets;
+    const maxTotal = Math.max(...buckets.map(b => b.total || 1));
+    const pad = { l: 30, r: 10, t: 10, b: 24 };
+    const plotW = W - pad.l - pad.r;
+    const plotH = H - pad.t - pad.b;
+    const barW = Math.max(2, plotW / buckets.length - 1);
+
+    for (let i = 0; i < buckets.length; i++) {
+      const b = buckets[i];
+      const x = pad.l + (i / buckets.length) * plotW;
+      let y = pad.t + plotH;
+
+      for (const key of ['pathogenic', 'likely_pathogenic', 'vus', 'likely_benign', 'benign']) {
+        const val = b[key] || 0;
+        if (val === 0) continue;
+        const barH = (val / maxTotal) * plotH;
+        y -= barH;
+        ctx.fillStyle = CLASS_COLORS[key] || '#6B7280';
+        ctx.fillRect(x, y, barW, barH);
+      }
+    }
+
+    // X labels (every nth)
+    ctx.fillStyle = '#9CA3AF';
+    ctx.font = '8px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    const step = Math.max(1, Math.floor(buckets.length / 6));
+    for (let i = 0; i < buckets.length; i += step) {
+      const x = pad.l + (i / buckets.length) * plotW + barW / 2;
+      const label = buckets[i].month || '';
+      ctx.fillText(label.slice(0, 7), x, H - 6);
+    }
+
+    // Y-axis
+    ctx.textAlign = 'right';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.fillText('0', pad.l - 4, pad.t + plotH);
+    ctx.fillText(maxTotal.toString(), pad.l - 4, pad.t + 10);
+  });
+
+  return wrap;
+}
+
+// ── Concordance Table ──────────────────────────────────────────────────────
+function renderConcordance() {
+  const wrap = h('div');
+  const data = state.geneData.concordance;
+  if (!data) {
+    wrap.appendChild(h('div', { className: 'empty-state' }, 'No concordance data'));
+    return wrap;
+  }
+
+  // Concordance rate
+  if (data.concordance_rate != null) {
+    wrap.appendChild(h('div', {
+      style: { fontSize: '12px', marginBottom: '8px', color: 'var(--text-secondary)' },
+    }, [
+      h('span', {}, 'Concordance rate: '),
+      h('strong', { style: { color: data.concordance_rate > 80 ? 'var(--ben)' : 'var(--path)' } },
+        `${data.concordance_rate}%`),
+    ]));
+  }
+
+  const matrix = data.matrix || [];
+  const discordant = matrix.filter(m => !m.concordant).slice(0, 8);
+
+  if (discordant.length === 0) {
+    wrap.appendChild(h('div', { className: 'empty-state' }, 'No discordant variants'));
+    return wrap;
+  }
+
+  const table = h('table', { className: 'conc-table' });
+  const thead = h('thead', {}, [
+    h('tr', {}, [
+      h('th', {}, 'Variant'),
+      h('th', {}, 'Classifications'),
+      h('th', {}, 'Status'),
+    ]),
+  ]);
+  table.appendChild(thead);
+
+  const tbody = h('tbody');
+  for (const row of discordant) {
+    const classes = row.classifications || {};
+    const classStr = Object.values(classes).slice(0, 3).join(', ');
+    const tr = h('tr', {}, [
+      h('td', { className: 'conc-hgvs', title: row.hgvs || '' }, row.hgvs || 'Unknown'),
+      h('td', {}, classStr),
+      h('td', {}, [
+        h('span', { className: row.concordant ? 'conc-concordant' : 'conc-discordant' },
+          row.concordant ? 'Concordant' : 'Discordant'),
+      ]),
+    ]);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
+// ── Survival Curve ─────────────────────────────────────────────────────────
+function renderSurvivalChart() {
+  const wrap = h('div');
+  const data = state.geneData.survival;
+  if (!data || !data.points || data.points.length === 0) {
+    wrap.appendChild(h('div', { className: 'empty-state' }, 'No survival data'));
+    return wrap;
+  }
+
+  // Stats
+  if (data.total_vus != null) {
+    wrap.appendChild(h('div', {
+      style: { fontSize: '11px', marginBottom: '6px', color: 'var(--text-secondary)' },
+    }, `${data.total_resolved || 0} of ${data.total_vus} VUS resolved`));
+  }
+
+  const canvas = h('canvas', { className: 'chart-canvas' });
+  wrap.appendChild(canvas);
+
+  requestAnimationFrame(() => {
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = 140 * dpr;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = '140px';
+    ctx.scale(dpr, dpr);
+    const W = rect.width, H = 140;
+
+    const points = data.points;
+    const maxMonths = Math.max(...points.map(p => p.months || 0), 1);
+    const pad = { l: 34, r: 10, t: 10, b: 24 };
+    const plotW = W - pad.l - pad.r;
+    const plotH = H - pad.t - pad.b;
+
+    // Grid
+    ctx.strokeStyle = '#E5E7EB';
+    ctx.lineWidth = 0.5;
+    for (let f = 0; f <= 1; f += 0.25) {
+      const y = pad.t + (1 - f) * plotH;
+      ctx.beginPath();
+      ctx.moveTo(pad.l, y);
+      ctx.lineTo(pad.l + plotW, y);
+      ctx.stroke();
+    }
+
+    // Curve (Kaplan-Meier step style)
+    ctx.beginPath();
+    ctx.strokeStyle = '#8B5CF6';
+    ctx.lineWidth = 2;
+    let prevX = pad.l, prevY = pad.t;
+
+    for (let i = 0; i < points.length; i++) {
+      const x = pad.l + (points[i].months / maxMonths) * plotW;
+      const y = pad.t + (1 - points[i].fraction) * plotH;
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, prevY); // horizontal step
+        ctx.lineTo(x, y); // vertical drop
+      }
+      prevX = x;
+      prevY = y;
+    }
+    ctx.stroke();
+
+    // Fill under curve
+    ctx.lineTo(prevX, pad.t + plotH);
+    ctx.lineTo(pad.l, pad.t + plotH);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(139, 92, 246, 0.08)';
+    ctx.fill();
+
+    // Axes labels
+    ctx.fillStyle = '#9CA3AF';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('100%', pad.l - 4, pad.t + 10);
+    ctx.fillText('0%', pad.l - 4, pad.t + plotH);
+    ctx.textAlign = 'center';
+    ctx.fillText('0', pad.l, H - 6);
+    ctx.fillText(`${maxMonths}mo`, pad.l + plotW, H - 6);
+    ctx.fillText('Months since VUS submission', W / 2, H - 4);
+  });
+
+  return wrap;
+}
+
+// ── Export ──────────────────────────────────────────────────────────────────
+function exportData(format) {
+  if (state.variants.length === 0) return;
+  const sep = format === 'tsv' ? '\t' : ',';
+  const ext = format === 'tsv' ? 'tsv' : 'csv';
+
+  const headers = ['hgvs', 'classification', 'chromosome', 'position', 'review_status', 'last_evaluated', 'clinvar_id'];
+  const rows = [headers.join(sep)];
+
+  for (const v of state.variants) {
+    const row = headers.map(h => {
+      let val = v[h] || '';
+      if (typeof val === 'string' && (val.includes(sep) || val.includes('"') || val.includes('\n'))) {
+        val = '"' + val.replace(/"/g, '""') + '"';
+      }
+      return val;
+    });
+    rows.push(row.join(sep));
+  }
+
+  const blob = new Blob([rows.join('\n')], { type: format === 'tsv' ? 'text/tab-separated-values' : 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${state.selectedGene || 'vus'}_variants.${ext}`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function init() {
+  render();
+  // Start with 7d (fast, small dataset)
+  const df = dateFrom(state.timeRange);
+  const params = {};
+  if (df) params.date_from = df;
+  try {
+    const period = state.timeRange === 'all' ? 'all' : state.timeRange;
+    const [statsRes, genesRes, tlRes, condRes] = await Promise.allSettled([
+      api('/stats', params),
+      api('/genes', { ...params, per_page: 100, sort: 'total_variants', order: 'desc' }),
+      api('/submissions-timeline', params),
+      api('/phenotype/top', { period }),
+    ]);
+    if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
+    if (genesRes.status === 'fulfilled') state.genes = (genesRes.value.data || []).sort((a, b) => (b.total_variants || 0) - (a.total_variants || 0));
+    state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
+    state.submissionsGranularity = tlRes.status === 'fulfilled' ? tlRes.value.data?.granularity : null;
+    if (condRes.status === 'fulfilled') { state.topConditions = condRes.value.data || []; state.conditionListPage = 0; }
+  } catch (e) {
+    console.error('Init error:', e);
+  }
+  render();
+  renderSubmissionsChart();
+
+  // Background: preload "all" stats for instant switch later
+  Promise.allSettled([
+    api('/stats'),
+    api('/genes', { per_page: 100, sort: 'total_variants', order: 'desc' }),
+    api('/submissions-timeline'),
+  ]).catch(() => {});
+}
+
 init();
+
+// Report height to parent for seamless iframe embedding
+(function(){if(window.parent===window)return;var l=0;function r(){var h=document.body.scrollHeight;if(h!==l){l=h;window.parent.postMessage({type:"vus-resize",height:h},"*");}}new MutationObserver(r).observe(document.body,{childList:true,subtree:true,attributes:true});setInterval(r,500);r();})();
