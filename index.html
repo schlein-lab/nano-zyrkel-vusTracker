@@ -1,98 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>nano-zyrkel-vusTracker live</title>
+<title>VUS Tracker — Zyrkel</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<div class="app">
-  <!-- Header -->
-  <div class="header">
-    <div class="header-left">
-      <h1>nano-zyrkel-vusTracker</h1>
-      <span class="badge live">live</span>
-    </div>
-    <div class="header-right">
-      <div class="search-wrap">
-        <input type="text" id="search" placeholder="Search gene/variant..." autocomplete="off">
-        <div class="autocomplete" id="autocomplete"></div>
-      </div>
-      <input type="date" id="report-date" title="What changed since?">
-      <button class="clear-btn" id="clear-btn" onclick="clearGene()" style="display:none">&#x2715;</button>
-    </div>
-  </div>
-
-  <!-- Hero -->
-  <div class="hero">
-    <div class="big-number" id="hero-number">&mdash;</div>
-    <div class="subtitle" id="hero-subtitle">loading...</div>
-  </div>
-
-  <!-- Time Range -->
-  <div class="time-bar">
-    <button class="tb" onclick="setRange('7d')">7d</button>
-    <button class="tb" onclick="setRange('1m')">1m</button>
-    <button class="tb" onclick="setRange('1y')">1y</button>
-    <button class="tb" onclick="setRange('5y')">5y</button>
-    <button class="tb active" onclick="setRange('all')">All</button>
-  </div>
-
-  <!-- Overview Mode (visible when no gene selected) -->
-  <div id="overview-mode">
-    <div class="section" id="top-genes-section"></div>
-    <div class="section" id="ideogram-section"></div>
-  </div>
-
-  <!-- Gene Dashboard (visible when gene selected) -->
-  <div id="gene-mode" style="display:none">
-    <div class="gene-header" id="gene-header"></div>
-    <div class="filter-bar" id="filter-bar"></div>
-    <div class="loading" id="loading" style="display:none">
-      <span class="loading-text" id="loading-text">loading...</span>
-    </div>
-    <div class="variant-list" id="variant-list"></div>
-    <div class="section" id="browser-section">
-      <div class="section-title" onclick="toggleSection(this)">Genome Browser</div>
-      <div class="section-body" id="genome-browser"></div>
-    </div>
-    <div class="section" id="drift-section"></div>
-    <div class="section" id="hotspot-section"></div>
-    <div class="section" id="timeline-section"></div>
-    <div class="section" id="concordance-section"></div>
-    <div class="section" id="survival-section"></div>
-    <div class="vcf-section" id="vcf-section">
-      <div class="vcf-drop" id="vcf-drop">
-        <div class="vcf-icon">VCF</div>
-        <div>Drop VCF or <label for="vcf-input" class="vcf-link">browse</label></div>
-        <input type="file" id="vcf-input" accept=".vcf,.vcf.gz" style="display:none">
-      </div>
-      <div id="vcf-results" style="display:none"></div>
-    </div>
-  </div>
-
-  <!-- Footer -->
-  <div class="footer">
-    <div class="footer-actions">
-      <select id="export-what" class="export-select">
-        <option value="focus">Gene</option>
-        <option value="changes">Changes</option>
-        <option value="top">Top 50</option>
-        <option value="all">All genes</option>
-      </select>
-      <button class="export-btn" onclick="doExport('csv')">CSV</button>
-      <button class="export-btn" onclick="doExport('tsv')">TSV</button>
-      <button class="export-btn" onclick="doExport('xls')">XLS</button>
-      <button class="export-btn" onclick="shareLink()">Share</button>
-    </div>
-    <div class="disclaimer">Research use only &middot; <a href="https://www.ncbi.nlm.nih.gov/clinvar/">ClinVar</a></div>
-    <div>nano-zyrkel &middot; <a href="https://zyrkel.com">zyrkel.com</a></div>
-  </div>
-</div>
-
+<div id="app"></div>
 <script type="module" src="app.js"></script>
-<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
 </body>
 </html>
