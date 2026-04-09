@@ -500,14 +500,15 @@ function renderSubmissionsChart() {
   // Same stacked-area style as gene timeline
   const n = buckets.length, w = 380, h = 120;
   const pad = { l: 36, r: 6, t: 8, b: 22 }, pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
-  const cats = buckets.map(b => ({
-    month: b.period || b.month || b.day || '',
-    p: parseInt(b.path || 0) + parseInt(b.likely_pathogenic || 0),
-    v: parseInt(b.vus || 0),
-    b: parseInt(b.ben || 0),
-  }));
-  cats.forEach(c => c.total = c.p + c.v + c.b);
-  const maxY = Math.max(1, ...cats.map(c => c.total));
+  // Build cumulative sums (starts at 0, grows over time)
+  let cumP = 0, cumV = 0, cumB = 0;
+  const cats = buckets.map(b => {
+    cumP += parseInt(b.path || 0) + parseInt(b.likely_pathogenic || 0);
+    cumV += parseInt(b.vus || 0);
+    cumB += parseInt(b.ben || 0);
+    return { month: b.period || b.month || b.day || '', p: cumP, v: cumV, b: cumB, total: cumP + cumV + cumB };
+  });
+  const maxY = Math.max(1, cats[cats.length - 1]?.total || 1);
   const xAt = i => pad.l + (i / Math.max(1, n - 1)) * pw;
   const yAt = v => pad.t + ph - (v / maxY) * ph;
 
