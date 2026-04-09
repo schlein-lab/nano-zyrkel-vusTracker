@@ -693,8 +693,6 @@ function renderGeneDetail() {
   scroll.appendChild(renderGeneHeader(gene));
 
   // Filter chips
-  scroll.appendChild(renderFilterChips());
-
   // Time range
   const timeRow = h('div', { className: 'time-range' });
   for (const r of ['1m', '1y', '5y', 'All']) {
@@ -948,6 +946,8 @@ function makeSection(title, contentOrFn, collapsed = false) {
 // ── Variant List ───────────────────────────────────────────────────────────
 function renderVariantList() {
   const wrap = h('div');
+  // Filters inside the Variants section
+  wrap.appendChild(renderFilterChips());
   if (state.variants.length === 0) {
     wrap.appendChild(h('div', { className: 'empty-state' }, 'No variants found for current filters'));
     return wrap;
