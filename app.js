@@ -69,6 +69,7 @@ function h(tag, attrs = {}, children = []) {
     else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else if (k === 'innerHTML') el.innerHTML = v;
+    else if (k === 'disabled') { if (v) el.setAttribute('disabled', ''); else el.removeAttribute('disabled'); }
     else el.setAttribute(k, v);
   }
   for (const c of (Array.isArray(children) ? children : [children])) {
