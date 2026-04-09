@@ -221,11 +221,15 @@ function renderOverview() {
     const key = r.toLowerCase();
     const btn = h('button', {
       className: `time-btn${state.timeRange === key ? ' active' : ''}`,
-      onClick: () => { state.timeRange = key; render(); },
+      onClick: () => { state.timeRange = key; reloadOverview(); },
     }, r);
     timeRow.appendChild(btn);
   }
   container.appendChild(timeRow);
+
+  // Submissions timeline chart placeholder
+  const chartEl = h('div', { className: 'submissions-chart', id: 'submissions-chart' });
+  container.appendChild(chartEl);
 
   // Gene list
   if (state.genes.length > 0) {
@@ -250,6 +254,75 @@ function renderOverview() {
   }
 
   return container;
+}
+
+// ── Reload Overview with time filter ──────────────────────────────────────
+async function reloadOverview() {
+  const df = dateFrom(state.timeRange);
+  const params = {};
+  if (df) params.date_from = df;
+
+  try {
+    const [statsRes, genesRes, tlRes] = await Promise.allSettled([
+      api('/stats', params),
+      api('/genes', { ...params, per_page: 15, sort: 'vus_count', order: 'desc' }),
+      api('/submissions-timeline', params),
+    ]);
+    if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
+    if (genesRes.status === 'fulfilled') state.genes = genesRes.value.data || [];
+    state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
+  } catch (e) { console.error(e); }
+  render();
+  renderSubmissionsChart();
+}
+
+function renderSubmissionsChart() {
+  const el = document.getElementById('submissions-chart');
+  if (!el) return;
+  const buckets = state.submissionsTimeline;
+  if (!buckets?.length) { el.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:11px;padding:8px">No submission data for this range</div>'; return; }
+
+  // Build cumulative sums
+  let cumPath = 0, cumVus = 0, cumBen = 0;
+  const pts = buckets.map(b => {
+    cumPath += (b.path || 0);
+    cumVus += (b.vus || 0);
+    cumBen += (b.ben || 0);
+    return { day: b.day, path: cumPath, vus: cumVus, ben: cumBen, total: cumPath + cumVus + cumBen };
+  });
+
+  const n = pts.length, w = 380, h = 100, pad = { l: 40, r: 8, t: 8, b: 20 };
+  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const maxY = Math.max(1, pts[n - 1].total);
+  const xAt = i => pad.l + (i / Math.max(1, n - 1)) * pw;
+  const yAt = v => pad.t + ph - (v / maxY) * ph;
+
+  const line = (key, color) => pts.map((p, i) => `${xAt(i)},${yAt(p[key])}`).join(' ');
+
+  // Y axis labels
+  const yLabels = [0, Math.round(maxY / 2), maxY].map(v =>
+    `<text x="${pad.l - 4}" y="${yAt(v) + 3}" text-anchor="end" fill="#9CA3AF" font-size="9">${v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v}</text>`
+  ).join('');
+
+  // X axis labels
+  const step = Math.max(1, Math.floor(n / 4));
+  const xLabels = pts.filter((_, i) => i % step === 0 || i === n - 1).map(p =>
+    `<text x="${xAt(pts.indexOf(p))}" y="${h - 2}" text-anchor="middle" fill="#9CA3AF" font-size="8">${p.day?.slice(5) || ''}</text>`
+  ).join('');
+
+  el.innerHTML = `<div style="font-size:11px;color:#6B7280;font-weight:600;margin-bottom:4px">Submissions over time</div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
+      <polyline points="${line('total', '#E5E7EB')}" fill="none" stroke="#E5E7EB" stroke-width="0.5"/>
+      <polyline points="${line('vus', '#EAB308')}" fill="none" stroke="#EAB308" stroke-width="1.5"/>
+      <polyline points="${line('path', '#EF4444')}" fill="none" stroke="#EF4444" stroke-width="1.5"/>
+      <polyline points="${line('ben', '#3B82F6')}" fill="none" stroke="#3B82F6" stroke-width="1.5"/>
+      ${yLabels}${xLabels}
+    </svg>
+    <div style="display:flex;gap:12px;justify-content:center;font-size:9px;color:#6B7280">
+      <span><span style="color:#EF4444">●</span> LP/P</span>
+      <span><span style="color:#EAB308">●</span> VUS</span>
+      <span><span style="color:#3B82F6">●</span> B/LB</span>
+    </div>`;
 }
 
 // ── Gene Selection ─────────────────────────────────────────────────────────
@@ -589,7 +662,7 @@ function renderGenomeBrowser() {
   const tooltip = h('div', { className: 'genome-tooltip' });
   const controls = h('div', { className: 'genome-controls' }, [
     h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.min(state.genomeBrowser.zoom * 1.5, 20); renderGenomeBrowserCanvas(); } }, 'Zoom +'),
-    h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.5, 1); state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Zoom \u2212'),
+    h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.5, 0.05); state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Zoom \u2212'),
     h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = 1; state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Reset'),
   ]);
 
@@ -620,7 +693,7 @@ function renderGenomeBrowser() {
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (e.deltaY < 0) state.genomeBrowser.zoom = Math.min(state.genomeBrowser.zoom * 1.2, 20);
-    else { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.2, 1); }
+    else { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.2, 0.05); }
     renderGenomeBrowserCanvas();
   }, { passive: false });
 
@@ -1071,16 +1144,19 @@ function exportData(format) {
 async function init() {
   render();
   try {
-    const [statsRes, genesRes] = await Promise.all([
+    const [statsRes, genesRes, tlRes] = await Promise.allSettled([
       api('/stats'),
       api('/genes', { per_page: 15, sort: 'vus_count', order: 'desc' }),
+      api('/submissions-timeline'),
     ]);
-    state.stats = statsRes.data;
-    state.genes = genesRes.data || [];
+    if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
+    if (genesRes.status === 'fulfilled') state.genes = genesRes.value.data || [];
+    state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
   } catch (e) {
     console.error('Init error:', e);
   }
   render();
+  renderSubmissionsChart();
 }
 
 init();
