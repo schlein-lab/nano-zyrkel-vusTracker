@@ -1,0 +1,25 @@
+name: "Weekly Alert Check"
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"  # Every Monday 8 AM UTC
+  workflow_dispatch:
+
+jobs:
+  check-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger reclassification alert check
+        env:
+          VUS_API_KEY: ${{ secrets.VUS_IMPORT_API_KEY }}
+        run: |
+          echo "Checking for reclassification alerts..."
+          RESULT=$(curl -sf -X POST \
+            "https://vus.zyrkel.com/api/v1/import/check-alerts" \
+            -H "Authorization: Bearer $VUS_IMPORT_API_KEY" \
+            -H "Accept: application/json")
+          echo "$RESULT"
+          SENT=$(echo "$RESULT" | jq -r ".data.alerts_sent // 0")
+          CHECKED=$(echo "$RESULT" | jq -r ".data.watches_checked // 0")
+          echo "Checked $CHECKED watches, sent $SENT alerts"
+
