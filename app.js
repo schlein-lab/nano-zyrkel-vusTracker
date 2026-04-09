@@ -10,7 +10,7 @@ const state = {
   geneData: {},
   variants: [],
   variantsMeta: {},
-  timeRange: '7d',
+  timeRange: '1m',
   activeFilters: new Set(['pathogenic', 'likely_pathogenic', 'uncertain_significance', 'likely_benign', 'benign']),
   variantPage: 1,
   searchResults: null,
@@ -120,9 +120,15 @@ function render() {
 }
 
 function renderHeader() {
+  const banner = h('div', { className: 'widget-banner' }, [
+    h('img', { src: 'header.png', alt: '', className: 'banner-img' }),
+    h('div', { className: 'banner-overlay' }, [
+      h('div', { className: 'banner-title' }, 'VUS Tracker'),
+      h('div', { className: 'banner-subtitle' }, 'ClinVar Variant Classification Monitor'),
+    ]),
+  ]);
   const logo = h('div', { className: 'widget-logo' }, [
-    h('svg', { innerHTML: '<circle cx="10" cy="10" r="8" fill="#8B5CF6"/><circle cx="10" cy="10" r="4" fill="#fff"/>', width: '20', height: '20', viewBox: '0 0 20 20' }),
-    h('span', {}, 'VUS Tracker'),
+    h('span', { style: { fontSize: '10px', color: 'var(--text-secondary)' } }, 'Powered by nano-zyrkel'),
   ]);
   const actions = h('div', { className: 'header-actions' });
 
@@ -142,8 +148,11 @@ function renderHeader() {
   }
 
   const hdr = h('div', { className: 'widget-header' });
-  hdr.appendChild(logo);
-  hdr.appendChild(actions);
+  hdr.appendChild(banner);
+  const bottomRow = h('div', { className: 'header-bottom' });
+  bottomRow.appendChild(logo);
+  bottomRow.appendChild(actions);
+  hdr.appendChild(bottomRow);
   return hdr;
 }
 
@@ -167,7 +176,7 @@ function renderSearch() {
 
   const wrap = h('div', { className: 'search-wrap' });
   const icon = h('span', { className: 'search-icon', innerHTML: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' });
-  const placeholder = state.searchMode === 'gene' ? 'Search gene or condition...' : 'Search phenotype (e.g. telecanthus)...';
+  const placeholder = state.searchMode === 'gene' ? 'Gene symbol (e.g. BRCA2, RYR2, SCN5A)' : 'Phenotype (e.g. telecanthus, ptosis, microcephaly)';
   const dropdown = h('div', { className: 'search-dropdown' });
   const input = h('input', {
     className: 'search-input', type: 'text', placeholder,
@@ -330,7 +339,7 @@ function renderOverview() {
 
   // Time range buttons
   const timeRow = h('div', { className: 'time-range' });
-  for (const r of ['7d', '1m', '1y', '5y', 'All']) {
+  for (const r of ['1m', '1y', '5y', 'All']) {
     const key = r.toLowerCase();
     const btn = h('button', {
       className: `time-btn${state.timeRange === key ? ' active' : ''}`,
@@ -478,7 +487,7 @@ async function selectGene(symbol) {
       api(`/genes/${symbol}/variants`, variantParams),
     ]);
     if (geneRes) state.geneData.gene = geneRes.data;
-    if (varRes) { state.variants = varRes.data || []; state.variantsMeta = varRes.meta || {}; }
+    if (varRes) { state.variants = varRes.data || []; state.variantsMeta = { total: varRes.total, per_page: varRes.per_page, current_page: varRes.current_page, last_page: varRes.last_page }; }
     render(); // Update immediately with gene header + variants
   } catch(e) { console.error('Gene load:', e); }
 
@@ -512,7 +521,7 @@ async function reloadVariants() {
   try {
     const res = await api(`/genes/${state.selectedGene}/variants`, params);
     state.variants = res.data || [];
-    state.variantsMeta = res.meta || {};
+    state.variantsMeta = { total: res.total, per_page: res.per_page, current_page: res.current_page, last_page: res.last_page };
   } catch (e) {
     console.error('Reload variants error:', e);
   }
@@ -554,7 +563,7 @@ function renderGeneDetail() {
 
   // Time range
   const timeRow = h('div', { className: 'time-range' });
-  for (const r of ['7d', '1m', '1y', '5y', 'All']) {
+  for (const r of ['1m', '1y', '5y', 'All']) {
     const key = r.toLowerCase();
     const btn = h('button', {
       className: `time-btn${state.timeRange === key ? ' active' : ''}`,
@@ -564,13 +573,14 @@ function renderGeneDetail() {
   }
   scroll.appendChild(timeRow);
 
-  // Sections (ALL collapsed by default — user clicks to expand)
-  scroll.appendChild(makeSection('Variants', renderVariantList, true));
-  scroll.appendChild(makeSection('Genome Browser', renderGenomeBrowser, true));
-  scroll.appendChild(makeSection('Classification Drift', renderDriftChart, true));
-  scroll.appendChild(makeSection('Timeline', renderTimelineChart, true));
-  scroll.appendChild(makeSection('Concordance', renderConcordance, true));
-  scroll.appendChild(makeSection('VUS Survival', renderSurvivalChart, true));
+  // Sections — show "computing" indicator if data not yet loaded
+  const gd = state.geneData;
+  scroll.appendChild(makeSection(`Variants (${state.variantsMeta?.total?.toLocaleString() || '...'})`, renderVariantList, true));
+  scroll.appendChild(makeSection('Genome Browser', gd.browser ? renderGenomeBrowser : () => computingPlaceholder('Querying genomic coordinates...'), true));
+  scroll.appendChild(makeSection('Classification Drift', gd.drift ? renderDriftChart : () => computingPlaceholder('Computing classification drift...'), true));
+  scroll.appendChild(makeSection('Timeline', gd.timeline ? renderTimelineChart : () => computingPlaceholder('Aggregating submission timeline...'), true));
+  if (gd.concordance?.matrix?.length) scroll.appendChild(makeSection('Concordance', renderConcordance, true));
+  if (gd.survival?.points?.length > 1) scroll.appendChild(makeSection('VUS Survival', renderSurvivalChart, true));
 
   container.appendChild(scroll);
   return container;
@@ -685,6 +695,13 @@ function renderFilterChips() {
   return row;
 }
 
+function computingPlaceholder(msg) {
+  return h('div', { className: 'computing-placeholder' }, [
+    h('div', { className: 'computing-bar' }, [h('div', { className: 'computing-fill' })]),
+    h('div', { className: 'computing-text' }, msg || 'Computing...'),
+  ]);
+}
+
 // ── Collapsible Section ────────────────────────────────────────────────────
 function makeSection(title, contentOrFn, collapsed = false) {
   const section = h('div', { className: `section${collapsed ? ' collapsed' : ''}` });
@@ -790,7 +807,7 @@ function renderVariantList() {
 
   // Server-side pagination (per_page=5)
   const meta = state.variantsMeta || {};
-  const totalPages = meta.total_pages || Math.ceil((meta.total || state.variants.length) / 5);
+  const totalPages = meta.last_page || Math.ceil((meta.total || state.variants.length) / 5);
   const pager = h('div', { className: 'variant-pager' });
   pager.appendChild(h('button', {
     className: 'page-btn', disabled: state.variantPage <= 1,
