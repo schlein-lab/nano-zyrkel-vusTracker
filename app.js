@@ -395,43 +395,57 @@ function renderSubmissionsChart() {
   const buckets = state.submissionsTimeline;
   if (!buckets?.length) { el.innerHTML = '<div style="text-align:center;color:#9CA3AF;font-size:11px;padding:8px">No submission data for this range</div>'; return; }
 
-  // Build cumulative sums
-  let cumPath = 0, cumVus = 0, cumBen = 0;
-  const pts = buckets.map(b => {
-    cumPath += (b.path || 0);
-    cumVus += (b.vus || 0);
-    cumBen += (b.ben || 0);
-    return { day: b.day, path: cumPath, vus: cumVus, ben: cumBen, total: cumPath + cumVus + cumBen };
-  });
-
-  const n = pts.length, w = 380, h = 100, pad = { l: 40, r: 8, t: 8, b: 20 };
-  const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
-  const maxY = Math.max(1, pts[n - 1].total);
+  // Same stacked-area style as gene timeline
+  const n = buckets.length, w = 380, h = 120;
+  const pad = { l: 36, r: 6, t: 8, b: 22 }, pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const cats = buckets.map(b => ({
+    month: b.month || b.day || '',
+    p: parseInt(b.path || 0) + parseInt(b.likely_pathogenic || 0),
+    v: parseInt(b.vus || 0),
+    b: parseInt(b.ben || 0),
+  }));
+  cats.forEach(c => c.total = c.p + c.v + c.b);
+  const maxY = Math.max(1, ...cats.map(c => c.total));
   const xAt = i => pad.l + (i / Math.max(1, n - 1)) * pw;
   const yAt = v => pad.t + ph - (v / maxY) * ph;
 
-  const line = (key, color) => pts.map((p, i) => `${xAt(i)},${yAt(p[key])}`).join(' ');
+  // Stacked area paths (same as gene timeline)
+  const makePath = (upper, lower) => {
+    let d = 'M' + upper.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' L');
+    d += ' L' + [...lower].reverse().map((v, i) => `${xAt(n - 1 - i)},${yAt(v)}`).join(' L') + ' Z';
+    return d;
+  };
 
-  // Y axis labels
-  const yLabels = [0, Math.round(maxY / 2), maxY].map(v =>
-    `<text x="${pad.l - 4}" y="${yAt(v) + 3}" text-anchor="end" fill="#9CA3AF" font-size="9">${v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v}</text>`
+  const benPath = makePath(cats.map(c => c.b), cats.map(() => 0));
+  const vusPath = makePath(cats.map(c => c.b + c.v), cats.map(c => c.b));
+  const pathPath = makePath(cats.map(c => c.total), cats.map(c => c.b + c.v));
+
+  // Y labels
+  const fmtY = v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v;
+  const yLabels = [0, Math.round(maxY/2), maxY].map(v =>
+    `<text x="${pad.l-4}" y="${yAt(v)+3}" text-anchor="end" fill="#9CA3AF" font-size="8">${fmtY(v)}</text>`
   ).join('');
 
-  // X axis labels
-  const step = Math.max(1, Math.floor(n / 4));
-  const xLabels = pts.filter((_, i) => i % step === 0 || i === n - 1).map(p =>
-    `<text x="${xAt(pts.indexOf(p))}" y="${h - 2}" text-anchor="middle" fill="#9CA3AF" font-size="8">${p.day?.slice(5) || ''}</text>`
+  // X labels
+  const step = Math.max(1, Math.floor(n / 5));
+  const xLabels = cats.filter((_, i) => i % step === 0 || i === n - 1).map(c =>
+    `<text x="${xAt(cats.indexOf(c))}" y="${h-4}" text-anchor="middle" fill="#9CA3AF" font-size="8">${(c.month||'').slice(2,7)}</text>`
   ).join('');
 
-  el.innerHTML = `<div style="font-size:11px;color:#6B7280;font-weight:600;margin-bottom:4px">Submissions over time</div>
-    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">
-      <polyline points="${line('total', '#E5E7EB')}" fill="none" stroke="#E5E7EB" stroke-width="0.5"/>
-      <polyline points="${line('vus', '#EAB308')}" fill="none" stroke="#EAB308" stroke-width="1.5"/>
-      <polyline points="${line('path', '#EF4444')}" fill="none" stroke="#EF4444" stroke-width="1.5"/>
-      <polyline points="${line('ben', '#3B82F6')}" fill="none" stroke="#3B82F6" stroke-width="1.5"/>
+  // Grid lines
+  const grid = [0.25, 0.5, 0.75].map(f =>
+    `<line x1="${pad.l}" y1="${yAt(maxY*f)}" x2="${w-pad.r}" y2="${yAt(maxY*f)}" stroke="#F3F4F6" stroke-width="0.5"/>`
+  ).join('');
+
+  el.innerHTML = `<div style="font-size:11px;color:#6B7280;font-weight:600;margin-bottom:4px">ClinVar Submissions over Time</div>
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px" preserveAspectRatio="none">
+      ${grid}
+      <path d="${benPath}" fill="#3B82F6" opacity="0.5"/>
+      <path d="${vusPath}" fill="#EAB308" opacity="0.5"/>
+      <path d="${pathPath}" fill="#EF4444" opacity="0.5"/>
       ${yLabels}${xLabels}
     </svg>
-    <div style="display:flex;gap:12px;justify-content:center;font-size:9px;color:#6B7280">
+    <div style="display:flex;gap:12px;justify-content:center;font-size:9px;color:#6B7280;margin-top:2px">
       <span><span style="color:#EF4444">●</span> LP/P</span>
       <span><span style="color:#EAB308">●</span> VUS</span>
       <span><span style="color:#3B82F6">●</span> B/LB</span>
