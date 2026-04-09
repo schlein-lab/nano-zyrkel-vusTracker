@@ -720,5 +720,10 @@ body {
   text-align: center;
 }
 
+/* Phenotype links */
+.pheno-links { display: flex; flex-wrap: wrap; gap: 4px; }
+.pheno-link { font-size: 10px; color: var(--brand); text-decoration: none; background: var(--brand-light); padding: 1px 6px; border-radius: 6px; }
+.pheno-link:hover { background: var(--brand); color: #fff; }
+
 .widget-footer a { color: var(--brand); text-decoration: none; }
 .widget-footer a:hover { text-decoration: underline; }
