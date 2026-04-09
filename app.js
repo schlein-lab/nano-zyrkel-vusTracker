@@ -819,23 +819,6 @@ function renderFilterChips() {
   }
   wrap.appendChild(row);
 
-  // Coding / Non-coding toggle chips
-  const codingRow = h('div', { className: 'filter-chips', style: { marginTop: '4px' } });
-  for (const [val, label] of [['all', 'All'], ['coding', 'Coding'], ['noncoding', 'Non-coding']]) {
-    const active = state.codingFilter === val;
-    const chip = h('div', {
-      className: `filter-chip${active ? ' coding-active' : ' inactive'}`,
-      style: { fontSize: '10px', padding: '2px 6px', background: active ? '#8B5CF6' : '', color: active ? '#fff' : '' },
-      onClick: () => {
-        state.codingFilter = val;
-        state.variantPage = 1;
-        reloadVariants();
-      },
-    }, label);
-    codingRow.appendChild(chip);
-  }
-  wrap.appendChild(codingRow);
-
   // Nomenclature filter dropdown
   const nomRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px', alignItems: 'center' } });
   nomRow.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary)' } }, 'Show:'));
