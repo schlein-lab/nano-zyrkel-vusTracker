@@ -1008,12 +1008,35 @@ function renderVariantList() {
         details.appendChild(row);
       }
     }
+    // ClinVar link + Alert button
+    const actionRow = h('div', { style: { marginTop: '6px', display: 'flex', gap: '8px', alignItems: 'center' } });
     if (v.clinvar_id || v.variation_id) {
       const cvId = v.clinvar_id || v.variation_id;
-      details.appendChild(h('div', { style: { marginTop: '4px' } }, [
-        h('a', { href: `https://www.ncbi.nlm.nih.gov/clinvar/variation/${cvId}/`, target: '_blank' }, 'View on ClinVar \u2192'),
-      ]));
+      actionRow.appendChild(h('a', { href: `https://www.ncbi.nlm.nih.gov/clinvar/variation/${cvId}/`, target: '_blank', style: { fontSize: '11px' } }, 'ClinVar \u2192'));
     }
+    // Alert subscribe button
+    const alertBtn = h('button', {
+      className: 'alert-btn',
+      onClick: (e) => {
+        e.stopPropagation();
+        const existing = card.querySelector('.alert-form');
+        if (existing) { existing.remove(); return; }
+        const form = h('div', { className: 'alert-form' }, [
+          h('div', { style: { fontSize: '10px', fontWeight: '600', marginBottom: '4px' } }, '\uD83D\uDD14 Get notified on reclassification'),
+          h('input', {
+            type: 'email', placeholder: 'your@email.com', className: 'alert-email-input',
+            onKeydown: (ev) => { if (ev.key === 'Enter') submitAlert(ev.target.value, v, form); },
+          }),
+          h('button', {
+            className: 'alert-submit-btn',
+            onClick: () => { const input = form.querySelector('input'); submitAlert(input.value, v, form); },
+          }, 'Subscribe'),
+        ]);
+        card.appendChild(form);
+      },
+    }, '\uD83D\uDD14 Alert');
+    actionRow.appendChild(alertBtn);
+    details.appendChild(actionRow);
     card.appendChild(details);
     wrap.appendChild(card);
   }
@@ -1039,6 +1062,31 @@ function renderVariantList() {
   wrap.appendChild(pager);
 
   return wrap;
+}
+
+async function submitAlert(email, variant, formEl) {
+  if (!email || !email.includes('@')) { formEl.querySelector('input').style.borderColor = '#EF4444'; return; }
+  try {
+    const body = {
+      email,
+      gene_symbol: state.selectedGene,
+      variation_id: variant.variation_id || variant.clinvar_id || null,
+      hgvs: variant.hgvs || null,
+      alert_on_reclassification: true,
+      alert_on_new_submission: true,
+    };
+    const res = await fetch(`${API_BASE}/watchlist/subscribe?api_key=${API_KEY}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      formEl.innerHTML = '<div style="font-size:10px;color:#16A34A;padding:4px 0">\u2705 Check your email to confirm the alert for ' + (variant.hgvs || state.selectedGene) + '</div>';
+    } else {
+      formEl.innerHTML = '<div style="font-size:10px;color:#EF4444;padding:4px 0">\u274C ' + (data.message || data.error || 'Error') + '</div>';
+    }
+  } catch (e) {
+    formEl.innerHTML = '<div style="font-size:10px;color:#EF4444;padding:4px 0">\u274C Network error</div>';
+  }
 }
 
 async function exportAllVariants() {
