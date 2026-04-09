@@ -18,6 +18,8 @@ const state = {
   genomeBrowser: { zoom: 1, panX: 0, dragging: false, lastX: 0 },
   expandedVariants: new Set(),
   searchMode: 'gene', // 'gene' or 'phenotype'
+  topConditions: [],
+  conditionListPage: 0,
   phenotypeResults: null,
   phenotypeGenes: null,
   selectedHpoTerms: [],
@@ -382,24 +384,37 @@ function renderOverview() {
 
   // Gene list (or Top Phenotypes if in phenotype mode)
   if (state.searchMode === 'phenotype' && !state.phenotypeGenes) {
-    // Show curated example phenotypes as clickable tags
+    // Show top conditions from ClinVar submissions (precomputed)
     const phenoBox = h('div', { className: 'gene-list' });
-    phenoBox.appendChild(h('div', { className: 'gene-list-title' }, 'Top Phenotypes'));
-    const examplePhenotypes = ['Microcephaly', 'Seizures', 'Intellectual disability', 'Telecanthus', 'Ptosis', 'Short stature', 'Hearing loss', 'Cardiac', 'Ataxia', 'Retinal dystrophy'];
-    const tagWrap = h('div', { className: 'condition-tags', style: { justifyContent: 'center' } });
-    for (const p of examplePhenotypes) {
-      const tag = h('span', {
-        className: 'condition-tag',
-        style: { cursor: 'pointer' },
-        onClick: () => {
-          // Switch to phenotype search with this term
-          state.searchMode = 'phenotype';
-          handlePhenotypeSearchDirect(p);
-        },
-      }, p);
-      tagWrap.appendChild(tag);
+    phenoBox.appendChild(h('div', { className: 'gene-list-title' }, 'Top Phenotypes in ClinVar'));
+    if (state.topConditions && state.topConditions.length > 0) {
+      const maxC = state.topConditions[0]?.submission_count || 1;
+      const page = state.conditionListPage || 0;
+      const slice = state.topConditions.slice(page * 5, page * 5 + 5);
+      for (const c of slice) {
+        const pct = Math.max(4, (c.submission_count / maxC) * 100);
+        const row = h('div', { className: 'gene-row', onClick: () => { state.searchMode = 'phenotype'; handlePhenotypeSearchDirect(c.condition); } }, [
+          h('span', { className: 'gene-name', style: { fontSize: '11px' } }, c.condition),
+          h('span', { className: 'gene-vus-count' }, (c.submission_count || 0).toLocaleString()),
+        ]);
+        phenoBox.appendChild(row);
+        phenoBox.appendChild(h('div', { className: 'gene-bar-wrap' }, [h('div', { className: 'gene-bar', style: { width: pct + '%' } })]));
+      }
+      // Pagination
+      const totalPages = Math.ceil(state.topConditions.length / 5);
+      if (totalPages > 1) {
+        const pager = h('div', { className: 'variant-pager', style: { marginTop: '6px' } });
+        pager.appendChild(h('button', { className: 'page-btn', disabled: page <= 0, onClick: () => { state.conditionListPage = page - 1; render(); } }, '\u2190'));
+        pager.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary)' } }, `${page + 1}/${totalPages}`));
+        pager.appendChild(h('button', { className: 'page-btn', disabled: page >= totalPages - 1, onClick: () => { state.conditionListPage = page + 1; render(); } }, '\u2192'));
+        phenoBox.appendChild(pager);
+      }
+    } else {
+      phenoBox.appendChild(h('div', { className: 'computing-placeholder' }, [
+        h('div', { className: 'computing-bar' }, [h('div', { className: 'computing-fill' })]),
+        h('div', { className: 'computing-text' }, 'Loading top phenotypes...'),
+      ]));
     }
-    phenoBox.appendChild(tagWrap);
     container.appendChild(phenoBox);
   } else if (state.genes.length > 0 && state.searchMode === 'gene') {
     const list = h('div', { className: 'gene-list' });
@@ -449,16 +464,19 @@ async function reloadOverview() {
   const df = dateFrom(state.timeRange);
   const params = {};
   if (df) params.date_from = df;
+  const period = state.timeRange === 'all' ? 'all' : state.timeRange;
 
   try {
-    const [statsRes, genesRes, tlRes] = await Promise.allSettled([
+    const [statsRes, genesRes, tlRes, condRes] = await Promise.allSettled([
       api('/stats', params),
-      api('/genes', { ...params, per_page: 15, sort: 'total_variants', order: 'desc' }),
+      api('/genes', { ...params, per_page: 100, sort: 'total_variants', order: 'desc' }),
       api('/submissions-timeline', params),
+      api('/phenotype/top', { period }),
     ]);
     if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
     if (genesRes.status === 'fulfilled') state.genes = (genesRes.value.data || []).sort((a, b) => (b.total_variants || 0) - (a.total_variants || 0));
     state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
+    if (condRes.status === 'fulfilled') { state.topConditions = condRes.value.data || []; state.conditionListPage = 0; }
   } catch (e) { console.error(e); }
   render();
   renderSubmissionsChart();
@@ -1450,15 +1468,18 @@ async function init() {
   const params = {};
   if (df) params.date_from = df;
   try {
-    const [statsRes, genesRes, tlRes] = await Promise.allSettled([
+    const period = state.timeRange === 'all' ? 'all' : state.timeRange;
+    const [statsRes, genesRes, tlRes, condRes] = await Promise.allSettled([
       api('/stats', params),
-      api('/genes', { ...params, per_page: 15, sort: 'total_variants', order: 'desc' }),
+      api('/genes', { ...params, per_page: 100, sort: 'total_variants', order: 'desc' }),
       api('/submissions-timeline', params),
+      api('/phenotype/top', { period }),
     ]);
     if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
     if (genesRes.status === 'fulfilled') state.genes = (genesRes.value.data || []).sort((a, b) => (b.total_variants || 0) - (a.total_variants || 0));
     state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
     state.submissionsGranularity = tlRes.status === 'fulfilled' ? tlRes.value.data?.granularity : null;
+    if (condRes.status === 'fulfilled') { state.topConditions = condRes.value.data || []; state.conditionListPage = 0; }
   } catch (e) {
     console.error('Init error:', e);
   }
