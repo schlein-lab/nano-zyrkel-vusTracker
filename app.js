@@ -16,6 +16,10 @@ const state = {
   searchResults: null,
   searchTimeout: null,
   genomeBrowser: { zoom: 1, panX: 0, dragging: false, lastX: 0 },
+  hgvsFilter: '',
+  codingFilter: 'all', // 'all', 'coding', 'noncoding'
+  positionFrom: '',
+  positionTo: '',
   expandedVariants: new Set(),
   searchMode: 'gene', // 'gene' or 'phenotype'
   topConditions: [],
@@ -567,6 +571,10 @@ async function selectGene(symbol) {
   state.variantPage = 1;
   state.expandedVariants.clear();
   state.activeFilters = new Set(['pathogenic', 'likely_pathogenic', 'uncertain_significance', 'likely_benign', 'benign']);
+  state.hgvsFilter = '';
+  state.codingFilter = 'all';
+  state.positionFrom = '';
+  state.positionTo = '';
 
   // INSTANT: show gene name + computing placeholders
   render();
@@ -614,10 +622,34 @@ async function reloadVariants() {
   const classFilter = [...state.activeFilters].join(',');
   if (classFilter) params.classification = classFilter;
   if (state.variantPage > 1) params.page = state.variantPage;
+  if (state.hgvsFilter) params.hgvs_search = state.hgvsFilter;
+  if (state.positionFrom) params.pos_from = state.positionFrom;
+  if (state.positionTo) params.pos_to = state.positionTo;
 
   try {
     const res = await api(`/genes/${state.selectedGene}/variants`, params);
-    state.variants = res.data || [];
+    let filtered = res.data || [];
+    // Client-side coding/noncoding filter
+    if (state.codingFilter === 'coding') {
+      filtered = filtered.filter(v => v.hgvs && /c\./.test(v.hgvs));
+    } else if (state.codingFilter === 'noncoding') {
+      filtered = filtered.filter(v => !v.hgvs || !/c\./.test(v.hgvs));
+    }
+    // Client-side HGVS fallback filter (in case API ignores hgvs_search)
+    if (state.hgvsFilter) {
+      const q = state.hgvsFilter.toLowerCase();
+      filtered = filtered.filter(v => v.hgvs && v.hgvs.toLowerCase().includes(q));
+    }
+    // Client-side position range fallback
+    if (state.positionFrom) {
+      const from = parseInt(state.positionFrom);
+      if (!isNaN(from)) filtered = filtered.filter(v => v.position >= from);
+    }
+    if (state.positionTo) {
+      const to = parseInt(state.positionTo);
+      if (!isNaN(to)) filtered = filtered.filter(v => v.position <= to);
+    }
+    state.variants = filtered;
     state.variantsMeta = { total: res.total, per_page: res.per_page, current_page: res.current_page, last_page: res.last_page };
   } catch (e) {
     console.error('Reload variants error:', e);
@@ -787,6 +819,9 @@ function renderDonut(cc, total) {
 
 // ── Filter Chips ───────────────────────────────────────────────────────────
 function renderFilterChips() {
+  const wrap = h('div', { className: 'filter-section' });
+
+  // Classification chips row
   const row = h('div', { className: 'filter-chips' });
   for (const [key, label] of Object.entries(CLASS_SHORT)) {
     const active = state.activeFilters.has(key);
@@ -802,7 +837,85 @@ function renderFilterChips() {
     }, label);
     row.appendChild(chip);
   }
-  return row;
+  wrap.appendChild(row);
+
+  // Coding / Non-coding toggle chips
+  const codingRow = h('div', { className: 'filter-chips', style: { marginTop: '4px' } });
+  for (const [val, label] of [['all', 'All'], ['coding', 'Coding'], ['noncoding', 'Non-coding']]) {
+    const active = state.codingFilter === val;
+    const chip = h('div', {
+      className: `filter-chip${active ? ' coding-active' : ' inactive'}`,
+      style: { fontSize: '10px', padding: '2px 6px', background: active ? '#8B5CF6' : '', color: active ? '#fff' : '' },
+      onClick: () => {
+        state.codingFilter = val;
+        state.variantPage = 1;
+        reloadVariants();
+      },
+    }, label);
+    codingRow.appendChild(chip);
+  }
+  wrap.appendChild(codingRow);
+
+  // HGVS search input
+  const hgvsRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px', alignItems: 'center' } });
+  const hgvsInput = h('input', {
+    type: 'text', placeholder: 'Filter by c./p. notation...',
+    value: state.hgvsFilter,
+    className: 'filter-input',
+    style: { flex: '1', fontSize: '11px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #E5E7EB', background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #111)' },
+    onInput: (e) => {
+      state.hgvsFilter = e.target.value;
+      state.variantPage = 1;
+      clearTimeout(state._hgvsTimeout);
+      state._hgvsTimeout = setTimeout(() => reloadVariants(), 400);
+    },
+  });
+  hgvsRow.appendChild(hgvsInput);
+  if (state.hgvsFilter) {
+    hgvsRow.appendChild(h('span', {
+      style: { cursor: 'pointer', fontSize: '14px', color: '#9CA3AF' },
+      onClick: () => { state.hgvsFilter = ''; state.variantPage = 1; reloadVariants(); },
+    }, '\u00D7'));
+  }
+  wrap.appendChild(hgvsRow);
+
+  // Position range inputs
+  const posRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '4px', alignItems: 'center' } });
+  posRow.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary, #6B7280)', whiteSpace: 'nowrap' } }, 'Pos:'));
+  const posFromInput = h('input', {
+    type: 'text', placeholder: 'from',
+    value: state.positionFrom,
+    style: { width: '70px', fontSize: '11px', padding: '3px 6px', borderRadius: '6px', border: '1px solid #E5E7EB', background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #111)' },
+    onInput: (e) => {
+      state.positionFrom = e.target.value;
+      state.variantPage = 1;
+      clearTimeout(state._posTimeout);
+      state._posTimeout = setTimeout(() => reloadVariants(), 600);
+    },
+  });
+  const posToInput = h('input', {
+    type: 'text', placeholder: 'to',
+    value: state.positionTo,
+    style: { width: '70px', fontSize: '11px', padding: '3px 6px', borderRadius: '6px', border: '1px solid #E5E7EB', background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #111)' },
+    onInput: (e) => {
+      state.positionTo = e.target.value;
+      state.variantPage = 1;
+      clearTimeout(state._posTimeout);
+      state._posTimeout = setTimeout(() => reloadVariants(), 600);
+    },
+  });
+  posRow.appendChild(posFromInput);
+  posRow.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary, #6B7280)' } }, '\u2013'));
+  posRow.appendChild(posToInput);
+  if (state.positionFrom || state.positionTo) {
+    posRow.appendChild(h('span', {
+      style: { cursor: 'pointer', fontSize: '14px', color: '#9CA3AF' },
+      onClick: () => { state.positionFrom = ''; state.positionTo = ''; state.variantPage = 1; reloadVariants(); },
+    }, '\u00D7'));
+  }
+  wrap.appendChild(posRow);
+
+  return wrap;
 }
 
 function computingPlaceholder(msg) {
@@ -1067,6 +1180,32 @@ function renderGenomeBrowserCanvas() {
   const plotW = (W - padding * 2) * zoom;
   const geneY = H - 30;
 
+  // Calculate visible genomic range based on zoom/pan
+  const viewStart = minPos - (padding - panX) / plotW * range;
+  const viewEnd = minPos + (W - padding - panX) / plotW * range;
+
+  // Gene boundary markers (dashed vertical lines at gene start/end)
+  ctx.save();
+  ctx.setLineDash([4, 3]);
+  ctx.strokeStyle = '#8B5CF6';
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.6;
+  // Gene start boundary
+  const geneStartX = padding + ((minPos - minPos) / range) * plotW + panX;
+  ctx.beginPath();
+  ctx.moveTo(geneStartX, 18);
+  ctx.lineTo(geneStartX, geneY + 6);
+  ctx.stroke();
+  // Gene end boundary
+  const geneEndX = padding + ((maxPos - minPos) / range) * plotW + panX;
+  ctx.beginPath();
+  ctx.moveTo(geneEndX, 18);
+  ctx.lineTo(geneEndX, geneY + 6);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
   // Gene body bar
   ctx.fillStyle = '#E5E7EB';
   const geneBarStart = padding + panX;
@@ -1077,11 +1216,34 @@ function renderGenomeBrowserCanvas() {
   ctx.fillRect(geneBarStart, geneY, plotW, 6);
   ctx.globalAlpha = 1;
 
-  // Gene name
+  // Gene name label centered on gene body
   ctx.fillStyle = '#6B7280';
   ctx.font = '10px Inter, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(state.geneData.browser?.gene || state.selectedGene, W / 2, geneY + 18);
+  const geneName = state.geneData.browser?.gene || state.selectedGene;
+  ctx.fillText(geneName, W / 2, geneY + 18);
+
+  // Upstream/downstream context when zoomed out
+  if (zoom < 0.3) {
+    ctx.font = '10px Inter, sans-serif';
+    ctx.fillStyle = '#B0B0B0';
+    // Upstream label (left of gene start)
+    if (geneStartX > 30) {
+      ctx.textAlign = 'left';
+      ctx.fillText('\u2190 upstream genes', 4, geneY + 3);
+    }
+    // Downstream label (right of gene end)
+    if (geneEndX < W - 30) {
+      ctx.textAlign = 'right';
+      ctx.fillText('downstream genes \u2192', W - 4, geneY + 3);
+    }
+  }
+  if (zoom < 0.1) {
+    ctx.font = '11px Inter, sans-serif';
+    ctx.fillStyle = '#9CA3AF';
+    ctx.textAlign = 'center';
+    ctx.fillText('Chromosomal context \u2014 zoom out further for full view', W / 2, 28);
+  }
 
   // Lollipop stems + heads
   for (const v of variants) {
