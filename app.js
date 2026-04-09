@@ -704,8 +704,10 @@ function renderGeneDetail() {
   }
   scroll.appendChild(timeRow);
 
-  // Sections — show "computing" indicator if data not yet loaded
+  // Sections — accordion behavior: only one open at a time
+  // "Overview" section with donut/bar/conditions — open by default
   const gd = state.geneData;
+  scroll.appendChild(makeSection('Overview', () => renderGeneOverviewSection(gene), false));
   scroll.appendChild(makeSection(`Variants (${state.variantsMeta?.total?.toLocaleString() || '...'})`, renderVariantList, true));
   scroll.appendChild(makeSection('Genome Browser', gd.browser ? renderGenomeBrowser : () => computingPlaceholder('Querying genomic coordinates...'), true));
   scroll.appendChild(makeSection('Classification Drift', gd.drift ? renderDriftChart : () => computingPlaceholder('Computing classification drift...'), true));
@@ -720,32 +722,28 @@ function renderGeneDetail() {
 function renderGeneHeader(gene) {
   const hdr = h('div', { className: 'gene-header' });
   hdr.appendChild(h('div', { className: 'gene-title' }, gene.symbol || state.selectedGene));
-
-  // Links
   const meta = h('div', { className: 'gene-meta' });
   if (gene.omim_id) meta.appendChild(h('a', { className: 'meta-link', href: `https://omim.org/entry/${gene.omim_id}`, target: '_blank' }, `OMIM:${gene.omim_id}`));
   if (gene.medgen_id) meta.appendChild(h('a', { className: 'meta-link', href: `https://www.ncbi.nlm.nih.gov/medgen/${gene.medgen_id}`, target: '_blank' }, `MedGen:${gene.medgen_id}`));
-  if (gene.total_variants) meta.appendChild(h('span', { className: 'meta-link', style: { color: 'var(--text-secondary)' } }, `${gene.total_variants} total variants`));
+  if (gene.total_variants) meta.appendChild(h('span', { className: 'meta-link', style: { color: 'var(--text-secondary)' } }, `${gene.total_variants.toLocaleString()} variants`));
   hdr.appendChild(meta);
+  return hdr;
+}
 
-  // Classification counts + donut
+function renderGeneOverviewSection(gene) {
+  const wrap = h('div');
   const cc = gene.classification_counts || {};
   const counts = h('div', { className: 'class-counts' });
   for (const [key, label] of Object.entries(CLASS_SHORT)) {
     const val = cc[key] || 0;
-    if (val > 0) {
-      counts.appendChild(h('span', { className: `class-badge ${CLASS_CSS[key]}` }, `${label} ${val}`));
-    }
+    if (val > 0) counts.appendChild(h('span', { className: `class-badge ${CLASS_CSS[key]}` }, `${label} ${val}`));
   }
-  hdr.appendChild(counts);
+  wrap.appendChild(counts);
 
-  // Donut
   const total = Object.values(cc).reduce((s, v) => s + (v || 0), 0);
   if (total > 0) {
     const donutRow = h('div', { className: 'donut-row' });
     donutRow.appendChild(renderDonut(cc, total));
-
-    // Distribution bar
     const distBar = h('div', { className: 'class-dist-bar' });
     for (const key of Object.keys(CLASS_COLORS)) {
       const pct = ((cc[key] || 0) / total) * 100;
@@ -753,47 +751,26 @@ function renderGeneHeader(gene) {
     }
     const distWrap = h('div', { style: { flex: '1' } });
     distWrap.appendChild(distBar);
-
-    // Legend
     const legend = h('div', { className: 'donut-legend' });
     for (const [key, color] of Object.entries(CLASS_COLORS)) {
-      if ((cc[key] || 0) > 0) {
-        const item = h('span', {}, [
-          h('span', { className: 'legend-dot', style: { background: color } }),
-          `${CLASS_SHORT[key]} ${((cc[key] / total) * 100).toFixed(0)}%`,
-        ]);
-        legend.appendChild(item);
-      }
+      if ((cc[key] || 0) > 0) legend.appendChild(h('span', {}, [h('span', { className: 'legend-dot', style: { background: color } }), `${CLASS_SHORT[key]} ${((cc[key] / total) * 100).toFixed(0)}%`]));
     }
     distWrap.appendChild(legend);
     donutRow.appendChild(distWrap);
-    hdr.appendChild(donutRow);
+    wrap.appendChild(donutRow);
   }
 
-  // Conditions (clickable — switches to phenotype search)
-  if (gene.conditions && gene.conditions.length > 0) {
+  if (gene.conditions?.length) {
     const tags = h('div', { className: 'condition-tags' });
     for (const c of gene.conditions.slice(0, 6)) {
       const name = typeof c === 'string' ? c : (c.name || c.condition_name || JSON.stringify(c));
-      tags.appendChild(h('span', {
-        className: 'condition-tag',
-        title: `Search phenotype: ${name}`,
-        style: { cursor: 'pointer' },
-        onClick: (e) => {
-          e.stopPropagation();
-          state.mode = 'overview';
-          state.selectedGene = null;
-          state.searchMode = 'phenotype';
-          state.phenotypeGenes = null;
-          state.selectedHpoTerms = [];
-          handlePhenotypeSearchDirect(name);
-        },
+      tags.appendChild(h('span', { className: 'condition-tag', title: `Search: ${name}`, style: { cursor: 'pointer' },
+        onClick: (e) => { e.stopPropagation(); state.mode='overview'; state.selectedGene=null; state.searchMode='phenotype'; state.phenotypeGenes=null; state.selectedHpoTerms=[]; handlePhenotypeSearchDirect(name); },
       }, name));
     }
-    hdr.appendChild(tags);
+    wrap.appendChild(tags);
   }
-
-  return hdr;
+  return wrap;
 }
 
 function renderDonut(cc, total) {
@@ -929,7 +906,7 @@ function computingPlaceholder(msg) {
 
 // ── Collapsible Section ────────────────────────────────────────────────────
 function makeSection(title, contentOrFn, collapsed = false) {
-  const section = h('div', { className: `section${collapsed ? ' collapsed' : ''}` });
+  const section = h('div', { className: `section${collapsed ? ' collapsed' : ''}`, 'data-accordion': 'true' });
   const header = h('div', { className: 'section-header' }, [
     h('span', { className: 'section-title' }, title),
     h('span', { className: 'section-toggle' }, '\u25BC'),
@@ -939,6 +916,13 @@ function makeSection(title, contentOrFn, collapsed = false) {
 
   header.addEventListener('click', () => {
     const wasCollapsed = section.classList.contains('collapsed');
+    // Accordion: collapse all siblings first
+    const parent = section.parentElement;
+    if (parent) {
+      parent.querySelectorAll('[data-accordion="true"]').forEach(s => {
+        if (s !== section) s.classList.add('collapsed');
+      });
+    }
     section.classList.toggle('collapsed');
     // Lazy render: only build content on first expand
     if (wasCollapsed && !rendered && typeof contentOrFn === 'function') {
