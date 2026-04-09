@@ -10,7 +10,7 @@ const state = {
   geneData: {},
   variants: [],
   variantsMeta: {},
-  timeRange: 'all',
+  timeRange: '7d',
   activeFilters: new Set(['pathogenic', 'likely_pathogenic', 'uncertain_significance', 'likely_benign', 'benign']),
   variantPage: 1,
   searchResults: null,
@@ -347,10 +347,10 @@ function renderOverview() {
   // Gene list
   if (state.genes.length > 0) {
     const list = h('div', { className: 'gene-list' });
-    list.appendChild(h('div', { className: 'gene-list-title' }, 'Top Genes by VUS Count'));
-    const maxVus = state.genes[0]?.vus_count || 1;
+    list.appendChild(h('div', { className: 'gene-list-title' }, 'Top Genes by Submissions'));
+    const maxVus = state.genes[0]?.total_variants || 1;
     state.genes.slice(0, 10).forEach((g, i) => {
-      const pct = Math.max(4, (g.vus_count / maxVus) * 100);
+      const pct = Math.max(4, ((g.total_variants || g.vus_count) / maxVus) * 100);
       const row = h('div', { className: 'gene-row', onClick: () => selectGene(g.symbol) }, [
         h('span', { className: 'gene-rank' }, `${i + 1}`),
         h('span', { className: 'gene-name' }, g.symbol),
@@ -378,7 +378,7 @@ async function reloadOverview() {
   try {
     const [statsRes, genesRes, tlRes] = await Promise.allSettled([
       api('/stats', params),
-      api('/genes', { ...params, per_page: 15, sort: 'vus_count', order: 'desc' }),
+      api('/genes', { ...params, per_page: 15, sort: 'total_variants', order: 'desc' }),
       api('/submissions-timeline', params),
     ]);
     if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
@@ -399,7 +399,7 @@ function renderSubmissionsChart() {
   const n = buckets.length, w = 380, h = 120;
   const pad = { l: 36, r: 6, t: 8, b: 22 }, pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
   const cats = buckets.map(b => ({
-    month: b.month || b.day || '',
+    month: b.period || b.month || b.day || '',
     p: parseInt(b.path || 0) + parseInt(b.likely_pathogenic || 0),
     v: parseInt(b.vus || 0),
     b: parseInt(b.ben || 0),
@@ -461,6 +461,8 @@ async function selectGene(symbol) {
   state.variantPage = 1;
   state.expandedVariants.clear();
   state.activeFilters = new Set(['pathogenic', 'likely_pathogenic', 'uncertain_significance', 'likely_benign', 'benign']);
+
+  // INSTANT: show gene name + computing placeholders
   render();
 
   const df = dateFrom(state.timeRange);
@@ -469,30 +471,32 @@ async function selectGene(symbol) {
   const classFilter = [...state.activeFilters].join(',');
   if (classFilter) variantParams.classification = classFilter;
 
-  const results = await Promise.allSettled([
-    api(`/genes/${symbol}`),
-    api(`/genes/${symbol}/variants`, variantParams),
+  // Phase 1: Gene header + variants (fast, ~300ms)
+  try {
+    const [geneRes, varRes] = await Promise.all([
+      api(`/genes/${symbol}`),
+      api(`/genes/${symbol}/variants`, variantParams),
+    ]);
+    if (geneRes) state.geneData.gene = geneRes.data;
+    if (varRes) { state.variants = varRes.data || []; state.variantsMeta = varRes.meta || {}; }
+    render(); // Update immediately with gene header + variants
+  } catch(e) { console.error('Gene load:', e); }
+
+  // Phase 2: Heavy computations in background (user sees data already)
+  Promise.allSettled([
     api(`/genes/${symbol}/timeline`),
-    api(`/genes/${symbol}/concordance`),
-    api(`/genes/${symbol}/survival`),
     api(`/genes/${symbol}/drift`),
     api(`/genes/${symbol}/genome-browser`),
-  ]);
-
-  const [geneRes, varRes, timelineRes, concRes, survRes, driftRes, browserRes] = results;
-
-  if (geneRes.status === 'fulfilled') state.geneData.gene = geneRes.value.data;
-  if (varRes.status === 'fulfilled') {
-    state.variants = varRes.value.data || [];
-    state.variantsMeta = varRes.value.meta || {};
-  }
-  if (timelineRes.status === 'fulfilled') state.geneData.timeline = timelineRes.value.data;
-  if (concRes.status === 'fulfilled') state.geneData.concordance = concRes.value.data;
-  if (survRes.status === 'fulfilled') state.geneData.survival = survRes.value.data;
-  if (driftRes.status === 'fulfilled') state.geneData.drift = driftRes.value.data;
-  if (browserRes.status === 'fulfilled') state.geneData.browser = browserRes.value.data;
-
-  render();
+    api(`/genes/${symbol}/concordance`),
+    api(`/genes/${symbol}/survival`),
+  ]).then(([timelineRes, driftRes, browserRes, concRes, survRes]) => {
+    if (timelineRes.status === 'fulfilled') state.geneData.timeline = timelineRes.value.data;
+    if (driftRes.status === 'fulfilled') state.geneData.drift = driftRes.value.data;
+    if (browserRes.status === 'fulfilled') state.geneData.browser = browserRes.value.data;
+    if (concRes.status === 'fulfilled') state.geneData.concordance = concRes.value.data;
+    if (survRes.status === 'fulfilled') state.geneData.survival = survRes.value.data;
+    render(); // Final update with all sections
+  });
 }
 
 // ── Reload variants (filter/time change) ───────────────────────────────────
@@ -530,7 +534,14 @@ function renderGeneDetail() {
 
   const gene = state.geneData.gene;
   if (!gene) {
-    scroll.appendChild(h('div', { className: 'loading-spinner' }, [h('div', { className: 'spinner' })]));
+    // Show gene name immediately with computing animation
+    scroll.appendChild(h('div', { className: 'gene-header-loading' }, [
+      h('div', { className: 'gene-name-big' }, state.selectedGene || '...'),
+      h('div', { className: 'computing-bar' }, [
+        h('div', { className: 'computing-fill' }),
+      ]),
+      h('div', { className: 'computing-text' }, 'Querying ClinVar database...'),
+    ]));
     container.appendChild(scroll);
     return container;
   }
@@ -1338,20 +1349,32 @@ function exportData(format) {
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
   render();
+  // Start with 7d (fast, small dataset)
+  const df = dateFrom(state.timeRange);
+  const params = {};
+  if (df) params.date_from = df;
   try {
     const [statsRes, genesRes, tlRes] = await Promise.allSettled([
-      api('/stats'),
-      api('/genes', { per_page: 15, sort: 'vus_count', order: 'desc' }),
-      api('/submissions-timeline'),
+      api('/stats', params),
+      api('/genes', { ...params, per_page: 15, sort: 'total_variants', order: 'desc' }),
+      api('/submissions-timeline', params),
     ]);
     if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
     if (genesRes.status === 'fulfilled') state.genes = genesRes.value.data || [];
     state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
+    state.submissionsGranularity = tlRes.status === 'fulfilled' ? tlRes.value.data?.granularity : null;
   } catch (e) {
     console.error('Init error:', e);
   }
   render();
   renderSubmissionsChart();
+
+  // Background: preload "all" stats for instant switch later
+  Promise.allSettled([
+    api('/stats'),
+    api('/genes', { per_page: 15, sort: 'total_variants', order: 'desc' }),
+    api('/submissions-timeline'),
+  ]).catch(() => {});
 }
 
 init();
