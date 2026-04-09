@@ -1171,7 +1171,9 @@ function renderGenomeBrowser() {
     renderGenomeBrowserCanvas();
   }, { passive: false });
 
-  requestAnimationFrame(() => renderGenomeBrowserCanvas());
+  // Double rAF: first frame lets browser compute layout after display:none→block,
+  // second frame reads correct getBoundingClientRect dimensions
+  requestAnimationFrame(() => requestAnimationFrame(() => renderGenomeBrowserCanvas()));
   return wrap;
 }
 
@@ -1374,7 +1376,7 @@ function renderDriftChart() {
   const canvas = h('canvas', { className: 'chart-canvas' });
   wrap.appendChild(canvas);
 
-  requestAnimationFrame(() => {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -1427,7 +1429,7 @@ function renderDriftChart() {
     ctx.textAlign = 'right';
     ctx.fillText('0', pad.l - 4, pad.t + plotH);
     ctx.fillText(maxTotal.toLocaleString(), pad.l - 4, pad.t + 10);
-  });
+  }));
 
   return wrap;
 }
@@ -1444,7 +1446,7 @@ function renderTimelineChart() {
   const canvas = h('canvas', { className: 'chart-canvas' });
   wrap.appendChild(canvas);
 
-  requestAnimationFrame(() => {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -1493,7 +1495,7 @@ function renderTimelineChart() {
     ctx.font = '9px Inter, sans-serif';
     ctx.fillText('0', pad.l - 4, pad.t + plotH);
     ctx.fillText(maxTotal.toString(), pad.l - 4, pad.t + 10);
-  });
+  }));
 
   return wrap;
 }
