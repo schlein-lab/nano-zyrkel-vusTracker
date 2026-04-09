@@ -637,10 +637,13 @@ async function reloadVariants() {
     } else if (state.codingFilter === 'noncoding') {
       filtered = filtered.filter(v => !v.hgvs || !/c\./.test(v.hgvs));
     }
-    // Client-side HGVS fallback filter (in case API ignores hgvs_search)
+    // Client-side text search — matches hgvs, condition, position, any field
     if (state.hgvsFilter) {
       const q = state.hgvsFilter.toLowerCase();
-      filtered = filtered.filter(v => v.hgvs && v.hgvs.toLowerCase().includes(q));
+      filtered = filtered.filter(v => {
+        const searchable = [v.hgvs, v.condition, v.review_status, v.chromosome ? `chr${v.chromosome}:${v.position}` : '', String(v.position || '')].join(' ').toLowerCase();
+        return searchable.includes(q);
+      });
     }
     // Client-side position range fallback
     if (state.positionFrom) {
@@ -835,28 +838,25 @@ function renderFilterChips() {
   }
   wrap.appendChild(codingRow);
 
-  // HGVS search input
-  const hgvsRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px', alignItems: 'center' } });
-  const hgvsInput = h('input', {
-    type: 'text', placeholder: 'Filter by c./p. notation...',
-    value: state.hgvsFilter,
-    className: 'filter-input',
-    style: { flex: '1', fontSize: '11px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #E5E7EB', background: 'var(--bg-card, #fff)', color: 'var(--text-primary, #111)' },
-    onInput: (e) => {
-      state.hgvsFilter = e.target.value;
+  // Nomenclature filter dropdown
+  const nomRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '6px', alignItems: 'center' } });
+  nomRow.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary)' } }, 'Show:'));
+  const nomSelect = h('select', {
+    style: { fontSize: '11px', padding: '3px 6px', borderRadius: '6px', border: '1px solid #E5E7EB', background: '#fff', color: '#111' },
+    value: state.hgvsFilter || 'all',
+    onChange: (e) => {
+      state.hgvsFilter = e.target.value === 'all' ? '' : e.target.value;
       state.variantPage = 1;
-      clearTimeout(state._hgvsTimeout);
-      state._hgvsTimeout = setTimeout(() => reloadVariants(), 400);
+      reloadVariants();
     },
   });
-  hgvsRow.appendChild(hgvsInput);
-  if (state.hgvsFilter) {
-    hgvsRow.appendChild(h('span', {
-      style: { cursor: 'pointer', fontSize: '14px', color: '#9CA3AF' },
-      onClick: () => { state.hgvsFilter = ''; state.variantPage = 1; reloadVariants(); },
-    }, '\u00D7'));
+  for (const [val, label] of [['all', 'All variants'], ['c.', 'DNA (c. notation)'], ['p.', 'Protein (p. notation)'], ['del', 'Deletions'], ['dup', 'Duplications'], ['ins', 'Insertions']]) {
+    const opt = h('option', { value: val }, label);
+    if ((state.hgvsFilter || 'all') === val) opt.selected = true;
+    nomSelect.appendChild(opt);
   }
-  wrap.appendChild(hgvsRow);
+  nomRow.appendChild(nomSelect);
+  wrap.appendChild(nomRow);
 
   // Position range inputs
   const posRow = h('div', { style: { display: 'flex', gap: '6px', marginTop: '4px', alignItems: 'center' } });
