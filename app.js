@@ -733,7 +733,23 @@ function renderGeneHeader(gene) {
 
 function renderGeneOverviewSection(gene) {
   const wrap = h('div');
-  const cc = gene.classification_counts || {};
+  // Use timeline data for time-filtered counts if available, otherwise gene totals
+  let cc = gene.classification_counts || {};
+  const df = dateFrom(state.timeRange);
+  if (df && state.geneData.timeline?.buckets?.length) {
+    const filtered = { pathogenic: 0, likely_pathogenic: 0, uncertain_significance: 0, likely_benign: 0, benign: 0 };
+    for (const b of state.geneData.timeline.buckets) {
+      if (b.month >= df.slice(0, 7)) {
+        filtered.pathogenic += parseInt(b.pathogenic || 0);
+        filtered.likely_pathogenic += parseInt(b.likely_pathogenic || 0);
+        filtered.uncertain_significance += parseInt(b.vus || 0);
+        filtered.likely_benign += parseInt(b.likely_benign || 0);
+        filtered.benign += parseInt(b.benign || 0);
+      }
+    }
+    const fTotal = Object.values(filtered).reduce((s, v) => s + v, 0);
+    if (fTotal > 0) cc = filtered;
+  }
   const counts = h('div', { className: 'class-counts' });
   for (const [key, label] of Object.entries(CLASS_SHORT)) {
     const val = cc[key] || 0;
