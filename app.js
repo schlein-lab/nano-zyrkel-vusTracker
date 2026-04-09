@@ -17,6 +17,10 @@ const state = {
   searchTimeout: null,
   genomeBrowser: { zoom: 1, panX: 0, dragging: false, lastX: 0 },
   expandedVariants: new Set(),
+  searchMode: 'gene', // 'gene' or 'phenotype'
+  phenotypeResults: null,
+  phenotypeGenes: null,
+  selectedHpoTerms: [],
 };
 
 // ── API helper ─────────────────────────────────────────────────────────────
@@ -145,19 +149,78 @@ function renderHeader() {
 
 // ── Search ─────────────────────────────────────────────────────────────────
 function renderSearch() {
+  const outer = h('div');
+
+  // Search mode toggle
+  const modeRow = h('div', { className: 'search-mode-toggle' });
+  const geneBtn = h('button', {
+    className: `search-mode-btn${state.searchMode === 'gene' ? ' active' : ''}`,
+    onClick: () => { state.searchMode = 'gene'; state.phenotypeResults = null; state.phenotypeGenes = null; state.selectedHpoTerms = []; render(); },
+  }, 'Gene');
+  const phenoBtn = h('button', {
+    className: `search-mode-btn${state.searchMode === 'phenotype' ? ' active' : ''}`,
+    onClick: () => { state.searchMode = 'phenotype'; state.searchResults = null; render(); },
+  }, 'Phenotype');
+  modeRow.appendChild(geneBtn);
+  modeRow.appendChild(phenoBtn);
+  outer.appendChild(modeRow);
+
   const wrap = h('div', { className: 'search-wrap' });
   const icon = h('span', { className: 'search-icon', innerHTML: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' });
+  const placeholder = state.searchMode === 'gene' ? 'Search gene or condition...' : 'Search phenotype (e.g. telecanthus)...';
+  const dropdown = h('div', { className: 'search-dropdown' });
   const input = h('input', {
-    className: 'search-input', type: 'text', placeholder: 'Search gene or condition...',
-    onInput: (e) => handleSearch(e.target.value, dropdown),
-    onFocus: (e) => { if (state.searchResults) dropdown.classList.add('open'); },
+    className: 'search-input', type: 'text', placeholder,
+    onInput: (e) => {
+      if (state.searchMode === 'gene') handleSearch(e.target.value, dropdown);
+      else handlePhenotypeSearch(e.target.value, dropdown);
+    },
+    onFocus: () => { if (state.searchResults || state.phenotypeResults) dropdown.classList.add('open'); },
     onBlur: () => { setTimeout(() => dropdown.classList.remove('open'), 200); },
   });
-  const dropdown = h('div', { className: 'search-dropdown' });
   wrap.appendChild(icon);
   wrap.appendChild(input);
   wrap.appendChild(dropdown);
-  return wrap;
+  outer.appendChild(wrap);
+
+  // Show selected HPO terms and gene results
+  if (state.searchMode === 'phenotype') {
+    if (state.selectedHpoTerms.length > 0) {
+      const tagsRow = h('div', { className: 'hpo-tags' });
+      for (const term of state.selectedHpoTerms) {
+        const tag = h('span', { className: 'hpo-tag' }, [
+          h('span', {}, `${term.name} (${term.hpo_id})`),
+          h('span', { className: 'hpo-tag-remove', onClick: () => {
+            state.selectedHpoTerms = state.selectedHpoTerms.filter(t => t.hpo_id !== term.hpo_id);
+            if (state.selectedHpoTerms.length > 0) loadPhenotypeGenes();
+            else { state.phenotypeGenes = null; render(); }
+          }}, ' \u00D7'),
+        ]);
+        tagsRow.appendChild(tag);
+      }
+      outer.appendChild(tagsRow);
+    }
+    if (state.phenotypeGenes && state.phenotypeGenes.length > 0) {
+      const geneList = h('div', { className: 'pheno-gene-list' });
+      geneList.appendChild(h('div', { className: 'gene-list-title' }, 'Genes matching phenotype'));
+      for (const g of state.phenotypeGenes) {
+        const diseases = (g.diseases || []).slice(0, 3).map(d =>
+          h('a', { href: `https://omim.org/entry/${d.replace('OMIM:', '')}`, target: '_blank', className: 'pheno-link', style: { fontSize: '10px' } }, d)
+        );
+        const row = h('div', { className: 'gene-row', onClick: () => selectGene(g.gene_symbol) }, [
+          h('span', { className: 'gene-name' }, g.gene_symbol),
+          h('span', { className: 'gene-vus-count' }, `${g.match_count || 0} matches`),
+          h('span', { className: 'pheno-diseases' }, diseases),
+        ]);
+        geneList.appendChild(row);
+      }
+      outer.appendChild(geneList);
+    } else if (state.phenotypeGenes !== null && state.phenotypeGenes.length === 0) {
+      outer.appendChild(h('div', { className: 'empty-state' }, 'No genes found for selected phenotypes'));
+    }
+  }
+
+  return outer;
 }
 
 async function handleSearch(query, dropdown) {
@@ -189,6 +252,56 @@ async function handleSearch(query, dropdown) {
       console.error('Search error:', e);
     }
   }, 300);
+}
+
+async function handlePhenotypeSearch(query, dropdown) {
+  clearTimeout(state.searchTimeout);
+  if (query.length < 2) {
+    dropdown.classList.remove('open');
+    state.phenotypeResults = null;
+    return;
+  }
+  state.searchTimeout = setTimeout(async () => {
+    try {
+      const res = await api('/phenotype/search', { q: query });
+      state.phenotypeResults = res.data || [];
+      clear(dropdown);
+      if (state.phenotypeResults.length === 0) {
+        dropdown.appendChild(h('div', { className: 'empty-state' }, 'No phenotypes found'));
+      } else {
+        for (const p of state.phenotypeResults.slice(0, 8)) {
+          const row = h('div', { className: 'search-item', onClick: () => {
+            if (!state.selectedHpoTerms.find(t => t.hpo_id === p.hpo_id)) {
+              state.selectedHpoTerms.push(p);
+              loadPhenotypeGenes();
+            }
+            dropdown.classList.remove('open');
+          }}, [
+            h('span', { className: 'gene-sym' }, p.hpo_id),
+            h('span', { className: 'gene-count' }, p.name),
+            h('span', { className: 'gene-count' }, `${p.gene_count || 0} genes`),
+          ]);
+          dropdown.appendChild(row);
+        }
+      }
+      dropdown.classList.add('open');
+    } catch (e) {
+      console.error('Phenotype search error:', e);
+    }
+  }, 300);
+}
+
+async function loadPhenotypeGenes() {
+  if (state.selectedHpoTerms.length === 0) { state.phenotypeGenes = null; render(); return; }
+  try {
+    const hpoIds = state.selectedHpoTerms.map(t => t.hpo_id).join(',');
+    const res = await api('/phenotype/genes', { hpo: hpoIds });
+    state.phenotypeGenes = res.data || [];
+  } catch (e) {
+    console.error('Phenotype genes error:', e);
+    state.phenotypeGenes = [];
+  }
+  render();
 }
 
 // ── Overview Mode ──────────────────────────────────────────────────────────
@@ -337,7 +450,7 @@ async function selectGene(symbol) {
   render();
 
   const df = dateFrom(state.timeRange);
-  const variantParams = { per_page: 50 };
+  const variantParams = { per_page: 5 };
   if (df) variantParams.date_from = df;
   const classFilter = [...state.activeFilters].join(',');
   if (classFilter) variantParams.classification = classFilter;
@@ -372,7 +485,7 @@ async function selectGene(symbol) {
 async function reloadVariants() {
   if (!state.selectedGene) return;
   const df = dateFrom(state.timeRange);
-  const params = { per_page: 50 };
+  const params = { per_page: 5 };
   if (df) params.date_from = df;
   const classFilter = [...state.activeFilters].join(',');
   if (classFilter) params.classification = classFilter;
@@ -426,13 +539,13 @@ function renderGeneDetail() {
   }
   scroll.appendChild(timeRow);
 
-  // Sections (ALL expanded by default)
-  scroll.appendChild(makeSection('Variants', renderVariantList()));
-  scroll.appendChild(makeSection('Genome Browser', renderGenomeBrowser()));
-  scroll.appendChild(makeSection('Classification Drift', renderDriftChart()));
-  scroll.appendChild(makeSection('Timeline', renderTimelineChart()));
-  scroll.appendChild(makeSection('Concordance', renderConcordance()));
-  scroll.appendChild(makeSection('VUS Survival', renderSurvivalChart()));
+  // Sections (ALL collapsed by default — user clicks to expand)
+  scroll.appendChild(makeSection('Variants', renderVariantList, true));
+  scroll.appendChild(makeSection('Genome Browser', renderGenomeBrowser, true));
+  scroll.appendChild(makeSection('Classification Drift', renderDriftChart, true));
+  scroll.appendChild(makeSection('Timeline', renderTimelineChart, true));
+  scroll.appendChild(makeSection('Concordance', renderConcordance, true));
+  scroll.appendChild(makeSection('VUS Survival', renderSurvivalChart, true));
 
   container.appendChild(scroll);
   return container;
@@ -548,17 +661,34 @@ function renderFilterChips() {
 }
 
 // ── Collapsible Section ────────────────────────────────────────────────────
-function makeSection(title, content) {
-  const section = h('div', { className: 'section' });
+function makeSection(title, contentOrFn, collapsed = false) {
+  const section = h('div', { className: `section${collapsed ? ' collapsed' : ''}` });
   const header = h('div', { className: 'section-header' }, [
     h('span', { className: 'section-title' }, title),
     h('span', { className: 'section-toggle' }, '\u25BC'),
   ]);
-  header.addEventListener('click', () => {
-    section.classList.toggle('collapsed');
-  });
   const body = h('div', { className: 'section-body' });
-  body.appendChild(content);
+  let rendered = false;
+
+  header.addEventListener('click', () => {
+    const wasCollapsed = section.classList.contains('collapsed');
+    section.classList.toggle('collapsed');
+    // Lazy render: only build content on first expand
+    if (wasCollapsed && !rendered && typeof contentOrFn === 'function') {
+      rendered = true;
+      body.appendChild(contentOrFn());
+    }
+  });
+
+  // If not collapsed or content is already an element, render immediately
+  if (typeof contentOrFn !== 'function') {
+    body.appendChild(contentOrFn);
+    rendered = true;
+  } else if (!collapsed) {
+    body.appendChild(contentOrFn());
+    rendered = true;
+  }
+
   section.appendChild(header);
   section.appendChild(body);
   return section;
@@ -572,17 +702,7 @@ function renderVariantList() {
     return wrap;
   }
 
-  const filtered = state.variants.filter(v => state.activeFilters.has(v.classification));
-  if (filtered.length === 0) {
-    wrap.appendChild(h('div', { className: 'empty-state' }, 'No variants match selected classifications'));
-    return wrap;
-  }
-
-  const pageSize = 10;
-  const start = (state.variantPage - 1) * pageSize;
-  const pageItems = filtered.slice(start, start + pageSize);
-
-  for (const v of pageItems) {
+  for (const v of state.variants) {
     const card = h('div', { className: `variant-card${state.expandedVariants.has(v.hgvs) ? ' open' : ''}` });
     const classLabel = (v.classification || '').replace(/_/g, ' ');
     const classKey = v.classification || 'uncertain_significance';
@@ -627,9 +747,9 @@ function renderVariantList() {
       if (links.length) {
         const row = h('div', { className: 'variant-detail-row' });
         row.appendChild(h('span', { className: 'variant-detail-label' }, 'Phenotype:'));
-        const wrap = h('span', { className: 'pheno-links' });
-        links.forEach(l => wrap.appendChild(l));
-        row.appendChild(wrap);
+        const innerWrap = h('span', { className: 'pheno-links' });
+        links.forEach(l => innerWrap.appendChild(l));
+        row.appendChild(innerWrap);
         details.appendChild(row);
       }
     }
@@ -643,23 +763,64 @@ function renderVariantList() {
     wrap.appendChild(card);
   }
 
-  // Pager
-  const totalPages = Math.ceil(filtered.length / pageSize);
-  if (totalPages > 1) {
-    const pager = h('div', { className: 'variant-pager' });
-    pager.appendChild(h('button', {
-      className: 'page-btn', disabled: state.variantPage <= 1,
-      onClick: () => { state.variantPage--; render(); },
-    }, '\u2190 Prev'));
-    pager.appendChild(h('span', { style: { fontSize: '11px', color: 'var(--text-secondary)', alignSelf: 'center' } }, `${state.variantPage}/${totalPages}`));
-    pager.appendChild(h('button', {
-      className: 'page-btn', disabled: state.variantPage >= totalPages,
-      onClick: () => { state.variantPage++; render(); },
-    }, 'Next \u2192'));
-    wrap.appendChild(pager);
-  }
+  // Server-side pagination (per_page=5)
+  const meta = state.variantsMeta || {};
+  const totalPages = meta.total_pages || Math.ceil((meta.total || state.variants.length) / 5);
+  const pager = h('div', { className: 'variant-pager' });
+  pager.appendChild(h('button', {
+    className: 'page-btn', disabled: state.variantPage <= 1,
+    onClick: () => { state.variantPage--; reloadVariants(); },
+  }, '\u2190 Prev'));
+  pager.appendChild(h('span', { style: { fontSize: '11px', color: 'var(--text-secondary)', alignSelf: 'center' } },
+    `${state.variantPage}/${totalPages || 1}${meta.total ? ` (${meta.total} total)` : ''}`));
+  pager.appendChild(h('button', {
+    className: 'page-btn', disabled: state.variantPage >= totalPages,
+    onClick: () => { state.variantPage++; reloadVariants(); },
+  }, 'Next \u2192'));
+  pager.appendChild(h('button', {
+    className: 'page-btn export-all-btn', title: 'Export all variants (CSV)',
+    onClick: () => exportAllVariants(),
+  }, 'Export All'));
+  wrap.appendChild(pager);
 
   return wrap;
+}
+
+async function exportAllVariants() {
+  if (!state.selectedGene) return;
+  try {
+    const df = dateFrom(state.timeRange);
+    const params = { per_page: 10000 };
+    if (df) params.date_from = df;
+    const classFilter = [...state.activeFilters].join(',');
+    if (classFilter) params.classification = classFilter;
+    const res = await api(`/genes/${state.selectedGene}/variants`, params);
+    const allVars = res.data || [];
+    if (allVars.length === 0) return;
+
+    const sep = ',';
+    const headers = ['hgvs', 'classification', 'chromosome', 'position', 'review_status', 'last_evaluated', 'clinvar_id'];
+    const rows = [headers.join(sep)];
+    for (const v of allVars) {
+      const row = headers.map(hdr => {
+        let val = v[hdr] || '';
+        if (typeof val === 'string' && (val.includes(sep) || val.includes('"') || val.includes('\n'))) {
+          val = '"' + val.replace(/"/g, '""') + '"';
+        }
+        return val;
+      });
+      rows.push(row.join(sep));
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${state.selectedGene}_all_variants.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error('Export all error:', e);
+  }
 }
 
 // ── Genome Browser ─────────────────────────────────────────────────────────
@@ -672,7 +833,7 @@ function renderGenomeBrowser() {
   const tooltip = h('div', { className: 'genome-tooltip' });
   const controls = h('div', { className: 'genome-controls' }, [
     h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.min(state.genomeBrowser.zoom * 1.5, 20); renderGenomeBrowserCanvas(); } }, 'Zoom +'),
-    h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.5, 0.05); state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Zoom \u2212'),
+    h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.5, 0.01); state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Zoom \u2212'),
     h('button', { className: 'genome-btn', onClick: () => { state.genomeBrowser.zoom = 1; state.genomeBrowser.panX = 0; renderGenomeBrowserCanvas(); } }, 'Reset'),
   ]);
 
@@ -703,7 +864,7 @@ function renderGenomeBrowser() {
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (e.deltaY < 0) state.genomeBrowser.zoom = Math.min(state.genomeBrowser.zoom * 1.2, 20);
-    else { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.2, 0.05); }
+    else { state.genomeBrowser.zoom = Math.max(state.genomeBrowser.zoom / 1.2, 0.01); }
     renderGenomeBrowserCanvas();
   }, { passive: false });
 
@@ -803,6 +964,16 @@ function renderGenomeBrowserCanvas() {
   ctx.fillText(minPos.toLocaleString(), padding + panX, H - 6);
   ctx.textAlign = 'right';
   ctx.fillText(maxPos.toLocaleString(), padding + plotW + panX, H - 6);
+
+  // Neighboring genomic context indicators
+  const chrLabel = state.geneData.browser?.chromosome || (variants[0]?.chromosome ? `chr${variants[0].chromosome}` : '');
+  const band = state.geneData.browser?.cytoband || '';
+  ctx.font = '9px Inter, sans-serif';
+  ctx.fillStyle = '#B0B0B0';
+  ctx.textAlign = 'left';
+  ctx.fillText(band ? `\u2190 ${chrLabel}${band} 5'` : '\u2190 5\' upstream', 2, 12);
+  ctx.textAlign = 'right';
+  ctx.fillText(band ? `3\' ${chrLabel}${band} \u2192` : '3\' downstream \u2192', W - 2, 12);
 
   // Store variant positions for hover
   canvas._variantPositions = variants.map(v => {
