@@ -750,5 +750,13 @@ body {
 .computing-text { font-size: 11px; color: var(--text-secondary); animation: pulse 2s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
 
+/* Alert button + form */
+.alert-btn { font-size: 10px; padding: 2px 8px; border: 1px solid var(--brand); border-radius: 6px; background: var(--brand-light); color: var(--brand); cursor: pointer; font-weight: 600; }
+.alert-btn:hover { background: var(--brand); color: #fff; }
+.alert-form { margin-top: 8px; padding: 8px; background: var(--brand-light); border-radius: 8px; }
+.alert-email-input { width: 100%; font-size: 11px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 4px; font-family: var(--font); }
+.alert-submit-btn { font-size: 10px; padding: 3px 12px; border: none; border-radius: 6px; background: var(--brand); color: #fff; cursor: pointer; font-weight: 600; }
+.alert-submit-btn:hover { background: var(--brand-hover); }
+
 .widget-footer a { color: var(--brand); text-decoration: none; }
 .widget-footer a:hover { text-decoration: underline; }
