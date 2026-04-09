@@ -225,20 +225,29 @@ function renderSearch() {
     }
     if (state.phenotypeGenes && state.phenotypeGenes.length > 0) {
       const geneList = h('div', { className: 'pheno-gene-list' });
-      geneList.appendChild(h('div', { className: 'gene-list-title' }, 'Genes matching phenotype'));
-      for (const g of state.phenotypeGenes) {
+      // Clear back button
+      geneList.appendChild(h('button', {
+        className: 'back-btn', style: { marginBottom: '6px' },
+        onClick: () => { state.selectedHpoTerms = []; state.phenotypeGenes = null; render(); },
+      }, '\u2190 Back to Top Phenotypes'));
+      geneList.appendChild(h('div', { className: 'gene-list-title' }, `${state.phenotypeGenes.length} genes matching phenotype`));
+      for (const g of state.phenotypeGenes.slice(0, 20)) {
         const diseases = (g.diseases || []).slice(0, 3).map(d =>
-          h('a', { href: `https://omim.org/entry/${d.replace('OMIM:', '')}`, target: '_blank', className: 'pheno-link', style: { fontSize: '10px' } }, d)
+          h('a', { href: d.startsWith('OMIM:') ? `https://omim.org/entry/${d.replace('OMIM:', '')}` : d.startsWith('ORPHA:') ? `https://www.orpha.net/en/disease/detail/${d.replace('ORPHA:', '')}` : '#', target: '_blank', className: 'pheno-link', style: { fontSize: '10px' } }, d)
         );
         const row = h('div', { className: 'gene-row', onClick: () => selectGene(g.gene_symbol) }, [
           h('span', { className: 'gene-name' }, g.gene_symbol),
-          h('span', { className: 'gene-vus-count' }, `${g.match_count || 0} matches`),
+          h('span', { className: 'gene-vus-count' }, `${g.match_count || 0}/${state.selectedHpoTerms.length}`),
           h('span', { className: 'pheno-diseases' }, diseases),
         ]);
         geneList.appendChild(row);
       }
       outer.appendChild(geneList);
     } else if (state.phenotypeGenes !== null && state.phenotypeGenes.length === 0) {
+      outer.appendChild(h('button', {
+        className: 'back-btn', style: { marginBottom: '6px' },
+        onClick: () => { state.selectedHpoTerms = []; state.phenotypeGenes = null; render(); },
+      }, '\u2190 Back to Top Phenotypes'));
       outer.appendChild(h('div', { className: 'empty-state' }, 'No genes found for selected phenotypes'));
     }
   }
@@ -404,9 +413,9 @@ function renderOverview() {
       const totalPages = Math.ceil(state.topConditions.length / 5);
       if (totalPages > 1) {
         const pager = h('div', { className: 'variant-pager', style: { marginTop: '6px' } });
-        pager.appendChild(h('button', { className: 'page-btn', disabled: page <= 0, onClick: () => { state.conditionListPage = page - 1; render(); } }, '\u2190'));
+        pager.appendChild(h('button', { className: 'page-btn', disabled: page <= 0, onClick: () => { state.conditionListPage = page - 1; render(); renderSubmissionsChart(); } }, '\u2190'));
         pager.appendChild(h('span', { style: { fontSize: '10px', color: 'var(--text-secondary)' } }, `${page + 1}/${totalPages}`));
-        pager.appendChild(h('button', { className: 'page-btn', disabled: page >= totalPages - 1, onClick: () => { state.conditionListPage = page + 1; render(); } }, '\u2192'));
+        pager.appendChild(h('button', { className: 'page-btn', disabled: page >= totalPages - 1, onClick: () => { state.conditionListPage = page + 1; render(); renderSubmissionsChart(); } }, '\u2192'));
         phenoBox.appendChild(pager);
       }
     } else {
@@ -441,13 +450,13 @@ function renderOverview() {
       const pager = h('div', { className: 'variant-pager' });
       pager.appendChild(h('button', {
         className: 'page-btn', disabled: state.geneListPage <= 0,
-        onClick: () => { state.geneListPage--; render(); },
+        onClick: () => { state.geneListPage--; render(); renderSubmissionsChart(); },
       }, '\u2190 Prev'));
       pager.appendChild(h('span', { style: { fontSize: '11px', color: 'var(--text-secondary)', alignSelf: 'center' } },
         `${state.geneListPage + 1}/${totalPages}`));
       pager.appendChild(h('button', {
         className: 'page-btn', disabled: state.geneListPage >= totalPages - 1,
-        onClick: () => { state.geneListPage++; render(); },
+        onClick: () => { state.geneListPage++; render(); renderSubmissionsChart(); },
       }, 'Next \u2192'));
       list.appendChild(pager);
     }
@@ -1489,7 +1498,7 @@ async function init() {
   // Background: preload "all" stats for instant switch later
   Promise.allSettled([
     api('/stats'),
-    api('/genes', { per_page: 15, sort: 'total_variants', order: 'desc' }),
+    api('/genes', { per_page: 100, sort: 'total_variants', order: 'desc' }),
     api('/submissions-timeline'),
   ]).catch(() => {});
 }
