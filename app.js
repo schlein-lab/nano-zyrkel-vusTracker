@@ -21,6 +21,7 @@ const state = {
   phenotypeResults: null,
   phenotypeGenes: null,
   selectedHpoTerms: [],
+  geneListPage: 0,
 };
 
 // ── API helper ─────────────────────────────────────────────────────────────
@@ -111,9 +112,20 @@ function render() {
 
   // Footer
   widget.appendChild(h('div', { className: 'widget-footer' }, [
-    h('span', {}, 'Powered by '),
-    h('a', { href: 'https://zyrkel.com', target: '_blank' }, 'zyrkel.com'),
-    h('span', {}, ' \u00B7 ClinVar data'),
+    h('div', {}, [
+      h('span', {}, 'Auto-updates daily from '),
+      h('a', { href: 'https://www.ncbi.nlm.nih.gov/clinvar/', target: '_blank' }, 'ClinVar'),
+      h('span', {}, ', '),
+      h('a', { href: 'https://hpo.jax.org/', target: '_blank' }, 'HPO'),
+      h('span', {}, ', '),
+      h('a', { href: 'https://omim.org/', target: '_blank' }, 'OMIM'),
+    ]),
+    h('div', { style: { marginTop: '2px' } }, [
+      h('span', {}, 'Powered by '),
+      h('a', { href: 'https://github.com/schlein-lab', target: '_blank' }, 'nano-zyrkel'),
+      h('span', {}, ' \u00B7 '),
+      h('a', { href: 'https://zyrkel.com', target: '_blank' }, 'zyrkel.com'),
+    ]),
   ]));
 
   app.appendChild(widget);
@@ -124,7 +136,7 @@ function renderHeader() {
     h('img', { src: 'header.png', alt: '', className: 'banner-img' }),
     h('div', { className: 'banner-overlay' }, [
       h('div', { className: 'banner-title' }, 'VUS Tracker'),
-      h('div', { className: 'banner-subtitle' }, 'ClinVar Variant Classification Monitor'),
+      h('div', { className: 'banner-subtitle' }, 'Variant Intelligence Platform'),
     ]),
   ]);
   const logo = h('div', { className: 'widget-logo' }, [
@@ -172,7 +184,6 @@ function renderSearch() {
   }, 'Phenotype');
   modeRow.appendChild(geneBtn);
   modeRow.appendChild(phenoBtn);
-  outer.appendChild(modeRow);
 
   const wrap = h('div', { className: 'search-wrap' });
   const icon = h('span', { className: 'search-icon', innerHTML: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>' });
@@ -191,6 +202,7 @@ function renderSearch() {
   wrap.appendChild(input);
   wrap.appendChild(dropdown);
   outer.appendChild(wrap);
+  outer.appendChild(modeRow);
 
   // Show selected HPO terms and gene results
   if (state.searchMode === 'phenotype') {
@@ -300,6 +312,21 @@ async function handlePhenotypeSearch(query, dropdown) {
   }, 300);
 }
 
+async function handlePhenotypeSearchDirect(query) {
+  try {
+    const res = await api('/phenotype/search', { q: query });
+    const results = res.data || [];
+    if (results.length > 0) {
+      const term = results[0];
+      if (!state.selectedHpoTerms.find(t => t.hpo_id === term.hpo_id)) {
+        state.selectedHpoTerms.push(term);
+        loadPhenotypeGenes();
+      }
+    }
+  } catch (e) { console.error('Direct phenotype search error:', e); }
+  render();
+}
+
 async function loadPhenotypeGenes() {
   if (state.selectedHpoTerms.length === 0) { state.phenotypeGenes = null; render(); return; }
   try {
@@ -343,7 +370,7 @@ function renderOverview() {
     const key = r.toLowerCase();
     const btn = h('button', {
       className: `time-btn${state.timeRange === key ? ' active' : ''}`,
-      onClick: () => { state.timeRange = key; reloadOverview(); },
+      onClick: () => { state.timeRange = key; state.geneListPage = 0; reloadOverview(); },
     }, r);
     timeRow.appendChild(btn);
   }
@@ -353,25 +380,64 @@ function renderOverview() {
   const chartEl = h('div', { className: 'submissions-chart', id: 'submissions-chart' });
   container.appendChild(chartEl);
 
-  // Gene list
-  if (state.genes.length > 0) {
+  // Gene list (or Top Phenotypes if in phenotype mode)
+  if (state.searchMode === 'phenotype' && !state.phenotypeGenes) {
+    // Show curated example phenotypes as clickable tags
+    const phenoBox = h('div', { className: 'gene-list' });
+    phenoBox.appendChild(h('div', { className: 'gene-list-title' }, 'Top Phenotypes'));
+    const examplePhenotypes = ['Microcephaly', 'Seizures', 'Intellectual disability', 'Telecanthus', 'Ptosis', 'Short stature', 'Hearing loss', 'Cardiac', 'Ataxia', 'Retinal dystrophy'];
+    const tagWrap = h('div', { className: 'condition-tags', style: { justifyContent: 'center' } });
+    for (const p of examplePhenotypes) {
+      const tag = h('span', {
+        className: 'condition-tag',
+        style: { cursor: 'pointer' },
+        onClick: () => {
+          // Switch to phenotype search with this term
+          state.searchMode = 'phenotype';
+          handlePhenotypeSearchDirect(p);
+        },
+      }, p);
+      tagWrap.appendChild(tag);
+    }
+    phenoBox.appendChild(tagWrap);
+    container.appendChild(phenoBox);
+  } else if (state.genes.length > 0 && state.searchMode === 'gene') {
     const list = h('div', { className: 'gene-list' });
     list.appendChild(h('div', { className: 'gene-list-title' }, 'Top Genes by Submissions'));
-    const maxVus = state.genes[0]?.total_variants || 1;
-    state.genes.slice(0, 10).forEach((g, i) => {
-      const pct = Math.max(4, ((g.total_variants || g.vus_count) / maxVus) * 100);
+    const maxVal = state.genes[0]?.total_variants || 1;
+    const pageSize = 5;
+    const start = state.geneListPage * pageSize;
+    const pageGenes = state.genes.slice(start, start + pageSize);
+    const totalPages = Math.ceil(state.genes.length / pageSize);
+    pageGenes.forEach((g, i) => {
+      const pct = Math.max(4, ((g.total_variants || 0) / maxVal) * 100);
       const row = h('div', { className: 'gene-row', onClick: () => selectGene(g.symbol) }, [
-        h('span', { className: 'gene-rank' }, `${i + 1}`),
+        h('span', { className: 'gene-rank' }, `${start + i + 1}`),
         h('span', { className: 'gene-name' }, g.symbol),
         h('div', { className: 'gene-bar-wrap' }, [
           h('div', { className: 'gene-bar', style: { width: `${pct}%` } }),
         ]),
-        h('span', { className: 'gene-vus-count' }, g.vus_count?.toLocaleString() || '0'),
+        h('span', { className: 'gene-vus-count' }, (g.total_variants || 0).toLocaleString()),
       ]);
       list.appendChild(row);
     });
+    // Pagination controls
+    if (totalPages > 1) {
+      const pager = h('div', { className: 'variant-pager' });
+      pager.appendChild(h('button', {
+        className: 'page-btn', disabled: state.geneListPage <= 0,
+        onClick: () => { state.geneListPage--; render(); },
+      }, '\u2190 Prev'));
+      pager.appendChild(h('span', { style: { fontSize: '11px', color: 'var(--text-secondary)', alignSelf: 'center' } },
+        `${state.geneListPage + 1}/${totalPages}`));
+      pager.appendChild(h('button', {
+        className: 'page-btn', disabled: state.geneListPage >= totalPages - 1,
+        onClick: () => { state.geneListPage++; render(); },
+      }, 'Next \u2192'));
+      list.appendChild(pager);
+    }
     container.appendChild(list);
-  } else {
+  } else if (state.searchMode === 'gene') {
     container.appendChild(h('div', { className: 'loading-spinner' }, [h('div', { className: 'spinner' })]));
   }
 
@@ -391,7 +457,7 @@ async function reloadOverview() {
       api('/submissions-timeline', params),
     ]);
     if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
-    if (genesRes.status === 'fulfilled') state.genes = genesRes.value.data || [];
+    if (genesRes.status === 'fulfilled') state.genes = (genesRes.value.data || []).sort((a, b) => (b.total_variants || 0) - (a.total_variants || 0));
     state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
   } catch (e) { console.error(e); }
   render();
@@ -639,12 +705,25 @@ function renderGeneHeader(gene) {
     hdr.appendChild(donutRow);
   }
 
-  // Conditions
+  // Conditions (clickable — switches to phenotype search)
   if (gene.conditions && gene.conditions.length > 0) {
     const tags = h('div', { className: 'condition-tags' });
     for (const c of gene.conditions.slice(0, 6)) {
       const name = typeof c === 'string' ? c : (c.name || c.condition_name || JSON.stringify(c));
-      tags.appendChild(h('span', { className: 'condition-tag', title: name }, name));
+      tags.appendChild(h('span', {
+        className: 'condition-tag',
+        title: `Search phenotype: ${name}`,
+        style: { cursor: 'pointer' },
+        onClick: (e) => {
+          e.stopPropagation();
+          state.mode = 'overview';
+          state.selectedGene = null;
+          state.searchMode = 'phenotype';
+          state.phenotypeGenes = null;
+          state.selectedHpoTerms = [];
+          handlePhenotypeSearchDirect(name);
+        },
+      }, name));
     }
     hdr.appendChild(tags);
   }
@@ -1377,7 +1456,7 @@ async function init() {
       api('/submissions-timeline', params),
     ]);
     if (statsRes.status === 'fulfilled') state.stats = statsRes.value.data;
-    if (genesRes.status === 'fulfilled') state.genes = genesRes.value.data || [];
+    if (genesRes.status === 'fulfilled') state.genes = (genesRes.value.data || []).sort((a, b) => (b.total_variants || 0) - (a.total_variants || 0));
     state.submissionsTimeline = tlRes.status === 'fulfilled' ? tlRes.value.data?.buckets : null;
     state.submissionsGranularity = tlRes.status === 'fulfilled' ? tlRes.value.data?.granularity : null;
   } catch (e) {
