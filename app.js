@@ -112,11 +112,13 @@ function render() {
   // Search
   widget.appendChild(renderSearch());
 
+  const content = h('div', { className: 'widget-content' });
   if (state.mode === 'overview') {
-    widget.appendChild(renderOverview());
+    content.appendChild(renderOverview());
   } else {
-    widget.appendChild(renderGeneDetail());
+    content.appendChild(renderGeneDetail());
   }
+  widget.appendChild(content);
 
   // Footer
   widget.appendChild(h('div', { className: 'widget-footer' }, [
