@@ -618,10 +618,20 @@ function renderVariantList() {
       ]));
     }
     if (v.phenotype_ids) {
-      details.appendChild(h('div', { className: 'variant-detail-row' }, [
-        h('span', { className: 'variant-detail-label' }, 'Phenotype IDs:'),
-        h('span', {}, typeof v.phenotype_ids === 'string' ? v.phenotype_ids : JSON.stringify(v.phenotype_ids)),
-      ]));
+      const pids = typeof v.phenotype_ids === 'string' ? JSON.parse(v.phenotype_ids) : v.phenotype_ids;
+      const links = [];
+      if (pids?.omim) pids.omim.forEach(id => links.push(h('a', { href: `https://omim.org/entry/${id}`, target: '_blank', className: 'pheno-link' }, `OMIM:${id}`)));
+      if (pids?.medgen) pids.medgen.forEach(id => links.push(h('a', { href: `https://www.ncbi.nlm.nih.gov/medgen/${id}`, target: '_blank', className: 'pheno-link' }, `MedGen:${id}`)));
+      if (pids?.orphanet) pids.orphanet.forEach(id => links.push(h('a', { href: `https://www.orpha.net/en/disease/detail/${id}`, target: '_blank', className: 'pheno-link' }, `ORPHA:${id}`)));
+      if (pids?.hpo) pids.hpo.forEach(id => links.push(h('a', { href: `https://hpo.jax.org/browse/term/${id}`, target: '_blank', className: 'pheno-link' }, id)));
+      if (links.length) {
+        const row = h('div', { className: 'variant-detail-row' });
+        row.appendChild(h('span', { className: 'variant-detail-label' }, 'Phenotype:'));
+        const wrap = h('span', { className: 'pheno-links' });
+        links.forEach(l => wrap.appendChild(l));
+        row.appendChild(wrap);
+        details.appendChild(row);
+      }
     }
     if (v.clinvar_id || v.variation_id) {
       const cvId = v.clinvar_id || v.variation_id;
