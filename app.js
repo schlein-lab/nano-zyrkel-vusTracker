@@ -97,6 +97,7 @@ const CLASS_CSS = {
 // ── Main render ────────────────────────────────────────────────────────────
 function render() {
   const app = document.getElementById('app');
+  const prevScroll = app.querySelector('.widget')?.scrollTop || 0;
   clear(app);
   const widget = h('div', { className: 'widget' });
 
@@ -131,6 +132,7 @@ function render() {
   ]));
 
   app.appendChild(widget);
+  if (prevScroll) widget.scrollTop = prevScroll;
 }
 
 function renderHeader() {
