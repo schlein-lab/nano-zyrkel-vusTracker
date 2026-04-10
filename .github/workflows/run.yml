@@ -1,4 +1,10 @@
-name: "ClinVar VUS Tracker"
+name: ClinVar VUS Tracker
+
+# vus-tracker has its own native binary (built from this repo's
+# Cargo workspace) so it does NOT use the generic data-update reusable
+# workflow. The vus-tracker binary calls its own modern ClinVar
+# pipeline directly while delegating the rest of the runtime to
+# nano-zyrkel-core.
 
 on:
   schedule:
@@ -16,70 +22,23 @@ jobs:
         with:
           lfs: false
 
-      - name: Download nano-zyrkel binary
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          mkdir -p /tmp/bin
-          gh release download --repo christian-schlein/nano-zyrkel \
-            --pattern "nano-zyrkel-*-linux*" --dir /tmp/bin
-          chmod +x /tmp/bin/nano-zyrkel*
-          ls -la /tmp/bin/
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build vus-tracker binary
+        run: cargo build --release --bin vus-tracker
 
       - name: Run ClinVar tracker
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          BINARY=$(ls /tmp/bin/nano-zyrkel* | head -1)
-          $BINARY --config hats/config.json --lang en --verbose
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: ./target/release/vus-tracker --config hats/config.json --lang en
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install + auth Codex CLI
-        env:
-          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
+      - name: Commit staging changes
         run: |
-          npm install -g @openai/codex
-          mkdir -p ~/.codex
-          echo "$CODEX_AUTH" > ~/.codex/auth.json
-
-      - name: Generate Story of the Day
-        run: |
-          RECLASS_FILE="staging/clinvar-tracker/reclassifications.jsonl"
-          STORY_FILE="staging/clinvar-tracker/story.txt"
-          if [ -s "$RECLASS_FILE" ]; then
-            # Pick a random clinically interesting classification change:
-            # Prefer VUS→Pathogenic (most impactful), then oldest changes
-            PICK=$(grep '"old":"vus"' "$RECLASS_FILE" | grep '"new":"pathogenic"' | shuf | head -1)
-            if [ -z "$PICK" ]; then
-              # Fallback: oldest classification change (most historical)
-              PICK=$(sort -t'"' -k12 "$RECLASS_FILE" | head -1)
-            fi
-            GENE=$(echo "$PICK" | jq -r '.gene // empty')
-            HGVS=$(echo "$PICK" | jq -r '.hgvs // empty' | head -c 60)
-            OLD=$(echo "$PICK" | jq -r '.old // empty')
-            NEW=$(echo "$PICK" | jq -r '.new // empty')
-            DATE=$(echo "$PICK" | jq -r '.detected_at // empty')
-            SUBMITTER=$(echo "$PICK" | jq -r '.submitter // empty' | head -c 40)
-            if [ -n "$GENE" ] && [ -n "$HGVS" ]; then
-              codex exec --skip-git-repo-check --ephemeral \
-                -o "$STORY_FILE" \
-                "Write a 3-sentence historical note about a ClinVar classification change. Variant: $HGVS in gene $GENE. Changed from $OLD to $NEW on $DATE by $SUBMITTER. Include: (1) what disease this gene is associated with, (2) how long this variant was classified as $OLD before the change, (3) the clinical impact — what does this mean for patients who carry this variant? Be factual, cite the gene's OMIM entry if known. English only. No markdown. No bullet points."
-              echo "Story generated for $GENE ($OLD → $NEW)"
-            fi
-          else
-            echo "No classification changes yet — skipping story"
-          fi
-
-      - name: Commit results
-        run: |
-          git config user.name "nano-zyrkel"
-          git config user.email "nano@zyrkel.local"
+          git config user.name "vus-tracker"
+          git config user.email "vus-tracker@users.noreply.github.com"
           git add staging/
           git diff --staged --quiet || \
-            git commit -m "clinvar $(date -u +%Y-%m-%d-%H%M)"
+            git commit -m "data: $(date -u +%Y-%m-%dT%H:%M)"
           git push || true

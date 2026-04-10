@@ -1,0 +1,16 @@
+name: Update nano-zyrkel cores
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  update:
+    uses: schlein-lab/nano-zyrkel/.github/workflows/update-core.yml@main
+    with:
+      binary-pinning: minor
+      wasm-pinning: minor
+      wasm-profile: viz-basic
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
