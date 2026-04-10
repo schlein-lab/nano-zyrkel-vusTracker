@@ -1,6 +1,6 @@
 [package]
 name = "vus-tracker"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Christian Schlein"]
 license = "MIT"
@@ -16,6 +16,10 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# Domain-specific dependencies (used by the clinvar/ + wasm/ modules
+# that live in this user repo). The generic plumbing — config parsing,
+# fetchers, conditions, notifiers, runtime — comes from
+# nano-zyrkel-core via the [target] sections below.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -24,39 +28,27 @@ regex = "1"
 sha2 = "0.10"
 base64 = "0.22"
 
-# WASM-only deps
-wasm-bindgen = { version = "0.2", optional = true }
-js-sys = { version = "0.3", optional = true }
-serde-wasm-bindgen = { version = "0.6", optional = true }
+# Native-only: pull the central binary core for the runtime, dispatch
+# logic, fetchers, notifiers and the Plugin trait. Pinned to a tag so
+# this user repo cannot pick up a breaking change accidentally.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+nano-zyrkel-core = { git = "https://github.com/schlein-lab/nano-zyrkel", tag = "bin-v0.1.0" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "process"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
 
-# Native-only deps (not compiled for WASM)
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "process"], optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
-tracing = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
-clap = { version = "4", features = ["derive"], optional = true }
-scraper = { version = "0.22", optional = true }
-url = { version = "2", optional = true }
-jsonpath-rust = { version = "0.7", optional = true }
-lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "builder", "smtp-transport"], optional = true }
-imap = { version = "2", optional = true }
-native-tls = { version = "0.2", optional = true }
-mailparse = { version = "0.15", optional = true }
+# WASM-only: pull the central WASM core for DataLoader + ConfigReader
+# and add the bindgen helpers we need for the panels/vcf modules.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+nano-zyrkel-wasm-core = { git = "https://github.com/schlein-lab/nano-zyrkel", tag = "wasm-v0.1.0", default-features = false, features = ["data", "config", "viz-basic", "viz-spatial"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde-wasm-bindgen = "0.6"
 
 [features]
-default = ["native"]
-native = ["tokio", "reqwest", "tracing", "tracing-subscriber", "clap", "scraper", "url", "jsonpath-rust", "lettre", "imap", "native-tls", "mailparse"]
-wasm = ["wasm-bindgen", "js-sys", "serde-wasm-bindgen"]
-rhai-scripting = ["dep:rhai"]
-browser = ["dep:headless_chrome"]
-
-[dependencies.rhai]
-version = "1"
-optional = true
-
-[dependencies.headless_chrome]
-version = "1"
-optional = true
+default = []
 
 [profile.release]
 lto = "thin"
@@ -65,4 +57,10 @@ strip = "symbols"
 opt-level = "s"
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+wasm-opt = [
+    "-Oz",
+    "--enable-bulk-memory",
+    "--enable-nontrapping-float-to-int",
+    "--enable-mutable-globals",
+    "--enable-sign-ext",
+]

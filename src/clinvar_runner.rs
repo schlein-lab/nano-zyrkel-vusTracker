@@ -1,8 +1,15 @@
 //! ClinVar orchestrator — binary-only (not compiled for WASM).
 //! Coordinates: fetch → parse → track → compute → report → notify.
+//!
+//! This is the vus-tracker domain pipeline. Generic plumbing
+//! (`HatConfig` parsing, telegram delivery) is pulled in from the
+//! central `nano-zyrkel-core` library so this crate stays focused on
+//! its actual job: tracking ClinVar reclassifications, computing
+//! aggregate stats and emitting the interactive widget.
 
 use anyhow::Result;
-use crate::config::HatConfig;
+use nano_zyrkel_core::{notify, HatConfig};
+
 use crate::clinvar::*;
 
 pub async fn run_clinvar(config: &HatConfig, dry_run: bool) -> Result<()> {
@@ -49,7 +56,7 @@ pub async fn run_clinvar(config: &HatConfig, dry_run: bool) -> Result<()> {
 
         if !dry_run && !reclassified.is_empty() && cv.notify_reclassifications {
             let msg = format_telegram_digest(&cv_state, &reclassified, added);
-            crate::notify::send_telegram(&msg, "en").await.ok();
+            notify::send_telegram(&msg, "en").await.ok();
         }
     }
 
