@@ -21,8 +21,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           mkdir -p /tmp/bin
-          gh release download --repo christian-schlein/nano-zyrkel \
-            --pattern "nano-zyrkel-*-linux*" --dir /tmp/bin
+          gh release download bin-v0.4.0 -R schlein-lab/nano-zyrkel \n            -p "nano-zyrkel-x86_64-unknown-linux-gnu.tar.gz" --clobber
+          tar xzf nano-zyrkel-x86_64-unknown-linux-gnu.tar.gz
+          chmod +x nano-zyrkel
           chmod +x /tmp/bin/nano-zyrkel*
           ls -la /tmp/bin/
 
@@ -31,7 +32,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          BINARY=$(ls /tmp/bin/nano-zyrkel* | head -1)
+          # binary extracted above
           $BINARY --config hats/config.json --lang en --verbose
 
       - name: Setup Node.js
