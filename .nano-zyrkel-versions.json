@@ -1,7 +1,6 @@
 {
-  "binary": "v0.1.0",
-  "wasm": "v0.1.0",
-  "compatible_with": "scaffold-interactive-app v0.1",
+  "binary": "v0.4.0",
+  "wasm": "v0.3.0",
   "pinning": {
     "binary": "minor",
     "wasm": "minor"
