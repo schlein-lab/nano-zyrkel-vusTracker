@@ -1,4 +1,4 @@
-name: "ClinVar VUS Tracker"
+name: "nano-zyrkel: ClinVar VUS Tracker"
 
 on:
   schedule:
@@ -13,74 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
 
-      - name: Download nano-zyrkel binary
+      - name: Get nano-zyrkel
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p /tmp/bin
           gh release download bin-v0.6.0 -R schlein-lab/nano-zyrkel -p "nano-zyrkel-x86_64-unknown-linux-gnu.tar.gz" --clobber
           tar xzf nano-zyrkel-x86_64-unknown-linux-gnu.tar.gz
           chmod +x nano-zyrkel
-          chmod +x /tmp/bin/nano-zyrkel*
-          ls -la /tmp/bin/
 
-      - name: Run ClinVar tracker
+      - name: Execute
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          # binary extracted above
-          $BINARY --config hats/config.json --lang en --verbose
+        run: ./nano-zyrkel --config hats/config.json --lang de
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install + auth Codex CLI
-        env:
-          CODEX_AUTH: ${{ secrets.CODEX_AUTH }}
-        run: |
-          npm install -g @openai/codex
-          mkdir -p ~/.codex
-          echo "$CODEX_AUTH" > ~/.codex/auth.json
-
-      - name: Generate Story of the Day
-        run: |
-          RECLASS_FILE="staging/clinvar-tracker/reclassifications.jsonl"
-          STORY_FILE="staging/clinvar-tracker/story.txt"
-          if [ -s "$RECLASS_FILE" ]; then
-            # Pick a random clinically interesting classification change:
-            # Prefer VUS→Pathogenic (most impactful), then oldest changes
-            PICK=$(grep '"old":"vus"' "$RECLASS_FILE" | grep '"new":"pathogenic"' | shuf | head -1)
-            if [ -z "$PICK" ]; then
-              # Fallback: oldest classification change (most historical)
-              PICK=$(sort -t'"' -k12 "$RECLASS_FILE" | head -1)
-            fi
-            GENE=$(echo "$PICK" | jq -r '.gene // empty')
-            HGVS=$(echo "$PICK" | jq -r '.hgvs // empty' | head -c 60)
-            OLD=$(echo "$PICK" | jq -r '.old // empty')
-            NEW=$(echo "$PICK" | jq -r '.new // empty')
-            DATE=$(echo "$PICK" | jq -r '.detected_at // empty')
-            SUBMITTER=$(echo "$PICK" | jq -r '.submitter // empty' | head -c 40)
-            if [ -n "$GENE" ] && [ -n "$HGVS" ]; then
-              codex exec --skip-git-repo-check --ephemeral \
-                -o "$STORY_FILE" \
-                "Write a 3-sentence historical note about a ClinVar classification change. Variant: $HGVS in gene $GENE. Changed from $OLD to $NEW on $DATE by $SUBMITTER. Include: (1) what disease this gene is associated with, (2) how long this variant was classified as $OLD before the change, (3) the clinical impact — what does this mean for patients who carry this variant? Be factual, cite the gene's OMIM entry if known. English only. No markdown. No bullet points."
-              echo "Story generated for $GENE ($OLD → $NEW)"
-            fi
-          else
-            echo "No classification changes yet — skipping story"
-          fi
-
-      - name: Commit results
+      - name: Commit
         run: |
           git config user.name "nano-zyrkel"
           git config user.email "nano@zyrkel.local"
           git add staging/
-          git diff --staged --quiet || \
-            git commit -m "clinvar $(date -u +%Y-%m-%d-%H%M)"
+          git diff --staged --quiet ||             git commit -m "clinvar $(date -u +%Y-%m-%dT%H:%M)"
           git push || true
